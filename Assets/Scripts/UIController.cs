@@ -45,9 +45,19 @@ public class UIController : MonoBehaviour
 
     [SerializeField] private Text autoCycleToggleText;
 
+    [Space] [SerializeField, Tooltip("标记点列表容器")]
+    private Transform markerListContainer;
+
+    [SerializeField] private GameObject markerListItemPrefab;
+    [SerializeField] private Text currentColorIndicator;
+    [SerializeField] private Image currentColorIndicatorImage;
+    [SerializeField] private Button clearMarkersButton;
+    [SerializeField] private Image[] markerColors;
+
     private Texture2D currentTexture;
     private List<string> availableImages = new List<string>();
     private List<GameObject> listItemObjects = new List<GameObject>();
+    private List<GameObject> markerListItemObjects = new List<GameObject>();
     private bool isUIVisible = false;
     private Coroutine slideCoroutine;
     private bool isUpdatingTimeSlider = false;
@@ -63,6 +73,7 @@ public class UIController : MonoBehaviour
         InitializeEarth();
         InitializeSliders();
         InitializeAutoCycleToggle();
+        InitializeMarkerSystem();
         InitializeImageList();
         LoadImagesFromStreamingAssets();
     }
@@ -73,6 +84,8 @@ public class UIController : MonoBehaviour
         UpdateTimeDisplay();
         UpdateSlidersDisplay();
         UpdateAutoCycleToggleDisplay();
+        UpdateMarkerListDisplay();
+        UpdateCurrentColorDisplay();
     }
 
     void OnDestroy()
@@ -83,6 +96,7 @@ public class UIController : MonoBehaviour
         }
 
         ClearListItemObjects();
+        ClearMarkerListItemObjects();
     }
 
     #endregion
@@ -107,6 +121,153 @@ public class UIController : MonoBehaviour
 
         dayTime.text = $"{sunLightController.GetTimeOfDayName()}";
         seasonTime.text = $"{sunLightController.GetCurrentSeasonName()}";
+    }
+
+    #endregion
+
+    #region Marker System
+
+    private void InitializeMarkerSystem()
+    {
+        UpdateCurrentColorDisplay();
+
+        if (clearMarkersButton != null)
+        {
+            clearMarkersButton.onClick.AddListener(ClearAllMarkers);
+        }
+
+        if (markerColors != null)
+        {
+            for (int i = 0; i < markerColors.Length; i++)
+            {
+                markerColors[i].color = EarthManager.Instance.markerColors[i];
+            }
+        }
+    }
+
+    private void UpdateCurrentColorDisplay()
+    {
+        if (currentColorIndicator == null || currentColorIndicatorImage == null || EarthManager.Instance == null)
+            return;
+
+        int colorIndex = EarthManager.Instance.GetCurrentColorIndex();
+        Color color = EarthManager.Instance.GetCurrentColor();
+
+        currentColorIndicator.text = $"当前颜色: {colorIndex}";
+        currentColorIndicatorImage.color = color;
+    }
+
+    private void UpdateMarkerListDisplay()
+    {
+        if (markerListContainer == null || EarthManager.Instance == null)
+            return;
+
+        var allMarkers = EarthManager.Instance.GetAllMarkers();
+
+        if (allMarkers.Count != markerListItemObjects.Count)
+        {
+            RefreshMarkerList(allMarkers);
+        }
+    }
+
+    private void RefreshMarkerList(List<MarkerData> markers)
+    {
+        ClearMarkerListItemObjects();
+
+        if (markerListContainer == null)
+            return;
+
+        for (int i = 0; i < markers.Count; i++)
+        {
+            GameObject item;
+
+            if (markerListItemPrefab != null)
+            {
+                item = Instantiate(markerListItemPrefab, markerListContainer);
+            }
+            else
+            {
+                item = CreateDefaultMarkerListItem();
+                item.transform.SetParent(markerListContainer);
+            }
+
+            SetupMarkerListItem(item, markers[i], i);
+            markerListItemObjects.Add(item);
+        }
+    }
+
+    private void SetupMarkerListItem(GameObject item, MarkerData markerData, int index)
+    {
+        Text markerText = item.GetComponentInChildren<Text>();
+        if (markerText != null)
+        {
+            markerText.text = $"#{index + 1} Pos: {markerData.position.ToString("F2")}";
+        }
+
+        Button deleteButton = item.GetComponent<Button>();
+        if (deleteButton != null)
+        {
+            GameObject markerObj = markerData.gameObject;
+            deleteButton.onClick.AddListener(() => DeleteMarker(markerObj));
+        }
+
+        Image colorImage = item.GetComponent<Image>();
+        if (colorImage != null && EarthManager.Instance != null)
+        {
+            Color markerColor = EarthManager.Instance.markerColors[markerData.colorIndex];
+            colorImage.color = new Color(markerColor.r, markerColor.g, markerColor.b, 0.3f);
+        }
+    }
+
+    private GameObject CreateDefaultMarkerListItem()
+    {
+        GameObject item = new GameObject("MarkerListItem");
+
+        RectTransform rectTransform = item.AddComponent<RectTransform>();
+        rectTransform.sizeDelta = new Vector2(0, 30);
+
+        Button button = item.AddComponent<Button>();
+
+        Text text = item.AddComponent<Text>();
+        text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        text.fontSize = 12;
+        text.color = Color.black;
+        text.alignment = TextAnchor.MiddleLeft;
+
+        RectTransform textRect = text.GetComponent<RectTransform>();
+        textRect.SetParent(rectTransform);
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = new Vector2(10, 0);
+        textRect.offsetMax = new Vector2(-10, 0);
+
+        return item;
+    }
+
+    private void DeleteMarker(GameObject marker)
+    {
+        if (EarthManager.Instance != null)
+        {
+            EarthManager.Instance.RemoveMarker(marker);
+        }
+    }
+
+    private void ClearAllMarkers()
+    {
+        if (EarthManager.Instance != null)
+        {
+            EarthManager.Instance.ClearAllMarkers();
+        }
+    }
+
+    private void ClearMarkerListItemObjects()
+    {
+        foreach (GameObject item in markerListItemObjects)
+        {
+            Destroy(item);
+        }
+
+        markerListItemObjects.Clear();
     }
 
     #endregion

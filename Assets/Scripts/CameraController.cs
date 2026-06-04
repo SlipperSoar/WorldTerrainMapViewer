@@ -6,6 +6,8 @@ public class CameraController : MonoBehaviour
 {
     #region Properties
 
+    [SerializeField] private SunLightController sunLightController;
+    
     [SerializeField] private Transform target;
     [SerializeField] private float distance = 10f;
     [SerializeField] private float minDistance = 2f;
@@ -101,7 +103,8 @@ public class CameraController : MonoBehaviour
     /// </summary>
     public void SetEquatorView()
     {
-        currentY = 0f;
+        currentY = sunLightController.AxialTilt;
+        currentX = 0f;
         UpdateCameraPosition();
     }
 
@@ -110,7 +113,8 @@ public class CameraController : MonoBehaviour
     /// </summary>
     public void SetNorthPoleView()
     {
-        currentY = maxY;
+        currentY = 90f - sunLightController.AxialTilt;
+        currentX = 90f;
         UpdateCameraPosition();
     }
 
@@ -119,7 +123,8 @@ public class CameraController : MonoBehaviour
     /// </summary>
     public void SetSouthPoleView()
     {
-        currentY = minY;
+        currentY = -90f - sunLightController.AxialTilt;
+        currentX = 90f;
         UpdateCameraPosition();
     }
 

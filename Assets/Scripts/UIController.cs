@@ -24,14 +24,34 @@ public class UIController : MonoBehaviour
     [SerializeField, Tooltip("一键南极")] private Button southButton;
     [SerializeField, Tooltip("一键俯视")] private Button topButton;
 
-    [SerializeField] private Text earthRotate;
+    [Space] [SerializeField] private Text earthRotate;
     [SerializeField] private CameraController cameraController;
+    [SerializeField] private Text dayTime;
+    [SerializeField] private Text seasonTime;
+    [SerializeField] private SunLightController sunLightController;
+
+    [Space] [SerializeField, Tooltip("时间滑动条（0-24小时）")]
+    private Slider timeSlider;
+
+    [SerializeField] private Text timeSliderValue;
+
+    [SerializeField, Tooltip("季节滑动条（0-40，4季×10细分）")]
+    private Slider seasonSlider;
+
+    [SerializeField] private Text seasonSliderValue;
+
+    [Space] [SerializeField, Tooltip("时间自动流动开关")]
+    private Toggle autoCycleToggle;
+
+    [SerializeField] private Text autoCycleToggleText;
 
     private Texture2D currentTexture;
     private List<string> availableImages = new List<string>();
     private List<GameObject> listItemObjects = new List<GameObject>();
     private bool isUIVisible = false;
     private Coroutine slideCoroutine;
+    private bool isUpdatingTimeSlider = false;
+    private bool isUpdatingSeasonSlider = false;
 
     #endregion
 
@@ -41,6 +61,8 @@ public class UIController : MonoBehaviour
     {
         InitializeTween();
         InitializeEarth();
+        InitializeSliders();
+        InitializeAutoCycleToggle();
         InitializeImageList();
         LoadImagesFromStreamingAssets();
     }
@@ -48,6 +70,9 @@ public class UIController : MonoBehaviour
     private void Update()
     {
         UpdateCameraRotationDisplay();
+        UpdateTimeDisplay();
+        UpdateSlidersDisplay();
+        UpdateAutoCycleToggleDisplay();
     }
 
     void OnDestroy()
@@ -73,6 +98,206 @@ public class UIController : MonoBehaviour
         float vertical = cameraController.GetVerticalRotation();
 
         earthRotate.text = $"H: {horizontal:F1}° V: {vertical:F1}°";
+    }
+
+    private void UpdateTimeDisplay()
+    {
+        if (dayTime == null || seasonTime == null || sunLightController == null)
+            return;
+
+        dayTime.text = $"{sunLightController.GetTimeOfDayName()}";
+        seasonTime.text = $"{sunLightController.GetCurrentSeasonName()}";
+    }
+
+    #endregion
+
+    #region Auto Cycle Toggle
+
+    private void InitializeAutoCycleToggle()
+    {
+        if (autoCycleToggle == null || sunLightController == null)
+            return;
+
+        autoCycleToggle.isOn = true;
+
+        autoCycleToggle.onValueChanged.AddListener(OnAutoCycleToggleChanged);
+
+        UpdateAutoCycleToggleText(true);
+    }
+
+    private void OnAutoCycleToggleChanged(bool isOn)
+    {
+        if (sunLightController == null)
+            return;
+
+        sunLightController.ToggleAutoCycle(isOn);
+
+        UpdateAutoCycleToggleText(isOn);
+
+        Debug.Log($"Time auto-cycle: {(isOn ? "ON" : "OFF")}");
+    }
+
+    private void UpdateAutoCycleToggleDisplay()
+    {
+        if (autoCycleToggle == null || sunLightController == null)
+            return;
+
+        bool currentAutoCycle = sunLightController.IsAutoCycleEnabled;
+
+        if (autoCycleToggle.isOn != currentAutoCycle)
+        {
+            autoCycleToggle.isOn = currentAutoCycle;
+            UpdateAutoCycleToggleText(currentAutoCycle);
+        }
+    }
+
+    private void UpdateAutoCycleToggleText(bool isOn)
+    {
+        if (autoCycleToggleText != null)
+        {
+            autoCycleToggleText.text = isOn ? "自动流动: 开" : "自动流动: 关";
+        }
+    }
+
+    public void SetAutoCycle(bool enabled)
+    {
+        if (sunLightController != null)
+        {
+            sunLightController.ToggleAutoCycle(enabled);
+
+            if (autoCycleToggle != null)
+            {
+                autoCycleToggle.isOn = enabled;
+            }
+
+            UpdateAutoCycleToggleText(enabled);
+        }
+    }
+
+    #endregion
+
+    #region Sliders
+
+    private void InitializeSliders()
+    {
+        if (timeSlider != null && sunLightController != null)
+        {
+            timeSlider.minValue = 0f;
+            timeSlider.maxValue = 24f;
+            timeSlider.wholeNumbers = false;
+            timeSlider.value = GetNormalizedTimeToHours(sunLightController.GetNormalizedTimeOfDay());
+
+            timeSlider.onValueChanged.AddListener(OnTimeSliderChanged);
+
+            if (timeSliderValue != null)
+            {
+                timeSliderValue.text = timeSlider.value.ToString("F1") + "h";
+            }
+        }
+
+        if (seasonSlider != null && sunLightController != null)
+        {
+            seasonSlider.minValue = 0f;
+            seasonSlider.maxValue = 40f;
+            seasonSlider.wholeNumbers = true;
+            seasonSlider.value = GetNormalizedSeasonToIndex(sunLightController.GetNormalizedDayOfYear());
+
+            seasonSlider.onValueChanged.AddListener(OnSeasonSliderChanged);
+
+            if (seasonSliderValue != null)
+            {
+                seasonSliderValue.text = FormatSeasonDisplay((int)seasonSlider.value);
+            }
+        }
+    }
+
+    private void OnTimeSliderChanged(float value)
+    {
+        if (isUpdatingTimeSlider || sunLightController == null)
+            return;
+
+        float normalizedTime = value / 24f;
+        sunLightController.SetTimeOfDay(normalizedTime * sunLightController.DayDuration);
+
+        if (timeSliderValue != null)
+        {
+            timeSliderValue.text = value.ToString("F1") + "h";
+        }
+    }
+
+    private void OnSeasonSliderChanged(float value)
+    {
+        if (isUpdatingSeasonSlider || sunLightController == null)
+            return;
+
+        int seasonIndex = Mathf.RoundToInt(value);
+        seasonIndex = Mathf.Clamp(seasonIndex, 0, 40);
+
+        float normalizedYear = seasonIndex / 40f;
+        sunLightController.SetDayOfYear(normalizedYear * sunLightController.YearDuration);
+
+        if (seasonSliderValue != null)
+        {
+            seasonSliderValue.text = FormatSeasonDisplay(seasonIndex);
+        }
+    }
+
+    private void UpdateSlidersDisplay()
+    {
+        if (timeSlider != null && !isUpdatingTimeSlider && sunLightController != null)
+        {
+            float currentHours = GetNormalizedTimeToHours(sunLightController.GetNormalizedTimeOfDay());
+
+            if (Mathf.Abs(timeSlider.value - currentHours) > 0.01f)
+            {
+                isUpdatingTimeSlider = true;
+                timeSlider.value = currentHours;
+                isUpdatingTimeSlider = false;
+
+                if (timeSliderValue != null)
+                {
+                    timeSliderValue.text = currentHours.ToString("F1") + "h";
+                }
+            }
+        }
+
+        if (seasonSlider != null && !isUpdatingSeasonSlider && sunLightController != null)
+        {
+            int currentIndex = GetNormalizedSeasonToIndex(sunLightController.GetNormalizedDayOfYear());
+
+            if (Mathf.Abs(seasonSlider.value - currentIndex) > 0.5f)
+            {
+                isUpdatingSeasonSlider = true;
+                seasonSlider.value = currentIndex;
+                isUpdatingSeasonSlider = false;
+
+                if (seasonSliderValue != null)
+                {
+                    seasonSliderValue.text = FormatSeasonDisplay(currentIndex);
+                }
+            }
+        }
+    }
+
+    private float GetNormalizedTimeToHours(float normalizedTime)
+    {
+        return normalizedTime * 24f;
+    }
+
+    private int GetNormalizedSeasonToIndex(float normalizedYear)
+    {
+        return Mathf.RoundToInt(normalizedYear * 40f);
+    }
+
+    private string FormatSeasonDisplay(int seasonIndex)
+    {
+        int season = seasonIndex / 10;
+        int subSeason = seasonIndex % 10;
+
+        string[] seasonNames = new string[] { "春", "夏", "秋", "冬" };
+        string seasonName = season < 4 ? seasonNames[season] : "春";
+
+        return $"{seasonName}{subSeason}/10";
     }
 
     #endregion

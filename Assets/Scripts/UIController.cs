@@ -9,7 +9,9 @@ public class UIController : MonoBehaviour
 {
     #region Properties
 
-    [SerializeField] private Text mapFileName;
+    [SerializeField] private Button exitButton;
+
+    [Header("加载地图面板")] [SerializeField] private Text mapFileName;
     [SerializeField] private Transform imageListContainer;
     [SerializeField] private GameObject imageListItemPrefab;
     [SerializeField] private RayCastArea inOutArea;
@@ -17,20 +19,20 @@ public class UIController : MonoBehaviour
     [SerializeField] private float slideDuration = 0.3f;
     [SerializeField] private float slideDistance = 300f;
 
-    [Space] [SerializeField, Tooltip("一键北极")]
+    [Header("一键定位特殊角度")] [SerializeField, Tooltip("一键北极")]
     private Button northButton;
 
     [SerializeField, Tooltip("一键赤道")] private Button equatorButton;
     [SerializeField, Tooltip("一键南极")] private Button southButton;
     [SerializeField, Tooltip("一键俯视")] private Button topButton;
 
-    [Space] [SerializeField] private Text earthRotate;
+    [Header("状态显示")] [SerializeField] private Text earthRotate;
     [SerializeField] private CameraController cameraController;
     [SerializeField] private Text dayTime;
     [SerializeField] private Text seasonTime;
     [SerializeField] private SunLightController sunLightController;
 
-    [Space] [SerializeField, Tooltip("时间滑动条（0-24小时）")]
+    [Header("时间")] [SerializeField, Tooltip("时间滑动条（0-24小时）")]
     private Slider timeSlider;
 
     [SerializeField] private Text timeSliderValue;
@@ -40,12 +42,11 @@ public class UIController : MonoBehaviour
 
     [SerializeField] private Text seasonSliderValue;
 
-    [Space] [SerializeField, Tooltip("时间自动流动开关")]
-    private Toggle autoCycleToggle;
+    [SerializeField, Tooltip("时间自动流动开关")] private Toggle autoCycleToggle;
 
     [SerializeField] private Text autoCycleToggleText;
 
-    [Space] [SerializeField, Tooltip("标记点列表容器")]
+    [Header("标点")] [SerializeField, Tooltip("标记点列表容器")]
     private Transform markerListContainer;
 
     [SerializeField] private GameObject markerListItemPrefab;
@@ -69,6 +70,8 @@ public class UIController : MonoBehaviour
 
     void Start()
     {
+        exitButton.onClick.AddListener(Application.Quit);
+
         InitializeTween();
         InitializeEarth();
         InitializeSliders();

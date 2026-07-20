@@ -11,6 +11,7 @@ public class EarthManager : MonoBehaviour
     [SerializeField] private Renderer earthRenderer;
     [SerializeField] private GameObject markerPrefab;
     [SerializeField] private Transform markersParent;
+    [SerializeField, Range(0f, 0.3f)] private float heightScale = 0.15f;
 
     private List<MarkerData> markers = new List<MarkerData>();
     private int currentColorIndex = 0;
@@ -72,6 +73,32 @@ public class EarthManager : MonoBehaviour
         else
         {
             Debug.LogError("Earth Renderer is not assigned!");
+        }
+    }
+
+    public void SetEarthHeightMap(Texture2D heightMap)
+    {
+        if (earthRenderer != null)
+        {
+            Material material = earthRenderer.material;
+            material.SetTexture("_HeightTex", heightMap);
+            material.SetFloat("_HeightScale", heightScale);
+
+            Debug.Log($"Successfully loaded height map: {heightMap}");
+        }
+        else
+        {
+            Debug.LogError("Earth Renderer is not assigned!");
+        }
+    }
+
+    public void ClearEarthHeightMap()
+    {
+        if (earthRenderer != null)
+        {
+            Material material = earthRenderer.material;
+            material.SetTexture("_HeightTex", null);
+            material.SetFloat("_HeightScale", 0f);
         }
     }
 

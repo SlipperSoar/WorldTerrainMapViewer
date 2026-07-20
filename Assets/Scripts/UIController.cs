@@ -55,6 +55,14 @@ public class UIController : MonoBehaviour
     [SerializeField] private Button clearMarkersButton;
     [SerializeField] private Image[] markerColors;
 
+    [Header("世界生成")] [SerializeField, Tooltip("生成新世界按钮")]
+    private Button generateButton;
+
+    [SerializeField, Tooltip("种子输入框")] private InputField seedInputField;
+    [SerializeField, Tooltip("生成进度文本")] private Text generationProgressText;
+    [SerializeField, Tooltip("水面占比滑动条（0.1-0.9）")] private Slider waterCoverageSlider;
+    [SerializeField, Tooltip("水面占比数值显示")] private Text waterCoverageValueText;
+
     private Texture2D currentTexture;
     private List<string> availableImages = new List<string>();
     private List<GameObject> listItemObjects = new List<GameObject>();
@@ -79,6 +87,7 @@ public class UIController : MonoBehaviour
         InitializeMarkerSystem();
         InitializeImageList();
         LoadImagesFromStreamingAssets();
+        InitializeWorldGeneration();
     }
 
     private void Update()
@@ -571,7 +580,13 @@ public class UIController : MonoBehaviour
                 extension == ".bmp" || extension == ".tga" || extension == ".tif" ||
                 extension == ".tiff")
             {
-                availableImages.Add(Path.GetFileName(file));
+                string fileName = Path.GetFileName(file);
+
+                // Skip height map files — they are loaded automatically with their terrain map
+                if (fileName.Contains("_height"))
+                    continue;
+
+                availableImages.Add(fileName);
             }
         }
 
@@ -655,6 +670,34 @@ public class UIController : MonoBehaviour
             currentTexture = newTexture;
 
             EarthManager.Instance.SetEarthSurface(newTexture);
+
+            // Auto-detect and load matching height map
+            string baseName = Path.GetFileNameWithoutExtension(filePath);
+            string heightPath = Path.Combine(
+                Path.GetDirectoryName(filePath),
+                baseName + "_height" + Path.GetExtension(filePath));
+
+            if (File.Exists(heightPath))
+            {
+                byte[] heightData = File.ReadAllBytes(heightPath);
+                Texture2D heightTex = new Texture2D(2, 2, TextureFormat.RGBA32, false, true);
+                if (heightTex.LoadImage(heightData))
+                {
+                    heightTex.filterMode = FilterMode.Bilinear;
+                    heightTex.wrapMode = TextureWrapMode.Repeat;
+                    EarthManager.Instance.SetEarthHeightMap(heightTex);
+                    Debug.Log($"Auto-loaded height map: {heightPath}");
+                }
+                else
+                {
+                    Destroy(heightTex);
+                    EarthManager.Instance.ClearEarthHeightMap();
+                }
+            }
+            else
+            {
+                EarthManager.Instance.ClearEarthHeightMap();
+            }
         }
         else
         {
@@ -695,6 +738,101 @@ public class UIController : MonoBehaviour
     private void OnTopButtonClick()
     {
         cameraController.SetTopDownView();
+    }
+
+    #endregion
+
+    #region 世界生成
+
+    private void InitializeWorldGeneration()
+    {
+        if (generateButton != null)
+        {
+            generateButton.onClick.AddListener(OnGenerateButtonClicked);
+        }
+
+        if (WorldTerrainGenerator.Instance != null)
+        {
+            WorldTerrainGenerator.Instance.onProgress = OnGenerationProgress;
+            WorldTerrainGenerator.Instance.onComplete = OnGenerationComplete;
+            WorldTerrainGenerator.Instance.onError = OnGenerationError;
+        }
+
+        if (waterCoverageSlider != null)
+        {
+            waterCoverageSlider.minValue = 0.1f;
+            waterCoverageSlider.maxValue = 0.9f;
+            waterCoverageSlider.wholeNumbers = false;
+            waterCoverageSlider.value = 0.5f;
+
+            waterCoverageSlider.onValueChanged.AddListener(OnWaterCoverageSliderChanged);
+
+            if (waterCoverageValueText != null)
+            {
+                waterCoverageValueText.text = $"{waterCoverageSlider.value * 100:F0}%";
+            }
+        }
+    }
+
+    private void OnGenerateButtonClicked()
+    {
+        int seed = 0;
+
+        if (seedInputField != null && !string.IsNullOrEmpty(seedInputField.text))
+        {
+            if (int.TryParse(seedInputField.text, out int parsed))
+                seed = parsed;
+        }
+
+        if (seed == 0)
+            seed = System.Environment.TickCount;
+
+        float waterCoverage = waterCoverageSlider != null ? waterCoverageSlider.value : 0.5f;
+
+        if (generationProgressText != null)
+            generationProgressText.text = "生成中...";
+
+        if (WorldTerrainGenerator.Instance != null)
+        {
+            WorldTerrainGenerator.Instance.GenerateWorld(seed, 0, waterCoverage);
+        }
+        else
+        {
+            Debug.LogError("WorldTerrainGenerator.Instance is null!");
+        }
+    }
+
+    private void OnWaterCoverageSliderChanged(float value)
+    {
+        if (waterCoverageValueText != null)
+        {
+            waterCoverageValueText.text = $"{value * 100:F0}%";
+        }
+    }
+
+    private void OnGenerationProgress(float progress)
+    {
+        if (generationProgressText != null)
+            generationProgressText.text = $"生成中... {progress * 100:F0}%";
+    }
+
+    private void OnGenerationComplete(string path)
+    {
+        if (generationProgressText != null)
+            generationProgressText.text = "生成完成";
+
+        Debug.Log($"World generation complete: {path}");
+
+        // Refresh image list to include the newly generated map
+        LoadImagesFromStreamingAssets();
+    }
+
+    private void OnGenerationError(string error)
+    {
+        if (generationProgressText != null)
+            generationProgressText.text = "生成失败";
+
+        Debug.LogError($"World generation error: {error}");
     }
 
     #endregion

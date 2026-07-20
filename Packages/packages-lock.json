@@ -1,25 +1,47 @@
 {
   "dependencies": {
+    "cn.tuanjie.ai.generators": {
+      "version": "file:../.codely-cli/extensions/TJGenerators/Packages/cn.tuanjie.ai.generators",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "cn.tuanjie.codely.bridge": "1.0.69",
+        "com.unity.modules.jsonserialize": "1.0.0",
+        "com.unity.modules.unitywebrequest": "1.0.0",
+        "com.unity.modules.video": "1.0.0",
+        "com.unity.editorcoroutines": "1.0.1"
+      }
+    },
+    "cn.tuanjie.codely.bridge": {
+      "version": "1.0.71",
+      "depth": 0,
+      "source": "registry",
+      "dependencies": {
+        "com.unity.ext.nunit": "1.0.6",
+        "com.unity.ugui": "1.0.0"
+      },
+      "url": "https://packages.tuanjie.cn"
+    },
     "com.unity.collab-proxy": {
       "version": "2.12.4",
       "depth": 0,
       "source": "registry",
       "dependencies": {},
-      "url": "https://packages.unity.cn"
+      "url": "https://packages.tuanjie.cn"
     },
     "com.unity.editorcoroutines": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "depth": 1,
       "source": "registry",
       "dependencies": {},
-      "url": "https://packages.unity.cn"
+      "url": "https://packages.tuanjie.cn"
     },
     "com.unity.ext.nunit": {
       "version": "1.0.6",
-      "depth": 2,
+      "depth": 1,
       "source": "registry",
       "dependencies": {},
-      "url": "https://packages.unity.cn"
+      "url": "https://packages.tuanjie.cn"
     },
     "com.unity.feature.development": {
       "version": "1.0.1",
@@ -42,7 +64,7 @@
       "dependencies": {
         "com.unity.ext.nunit": "1.0.6"
       },
-      "url": "https://packages.unity.cn"
+      "url": "https://packages.tuanjie.cn"
     },
     "com.unity.ide.visualstudio": {
       "version": "2.0.22",
@@ -51,28 +73,28 @@
       "dependencies": {
         "com.unity.test-framework": "1.1.9"
       },
-      "url": "https://packages.unity.cn"
+      "url": "https://packages.tuanjie.cn"
     },
     "com.unity.ide.vscode": {
       "version": "1.2.5",
       "depth": 1,
       "source": "registry",
       "dependencies": {},
-      "url": "https://packages.unity.cn"
+      "url": "https://packages.tuanjie.cn"
     },
     "com.unity.performance.profile-analyzer": {
       "version": "1.2.3",
       "depth": 1,
       "source": "registry",
       "dependencies": {},
-      "url": "https://packages.unity.cn"
+      "url": "https://packages.tuanjie.cn"
     },
     "com.unity.settings-manager": {
       "version": "2.1.0",
       "depth": 2,
       "source": "registry",
       "dependencies": {},
-      "url": "https://packages.unity.cn"
+      "url": "https://packages.tuanjie.cn"
     },
     "com.unity.test-framework": {
       "version": "1.1.33",
@@ -83,7 +105,7 @@
         "com.unity.modules.imgui": "1.0.0",
         "com.unity.modules.jsonserialize": "1.0.0"
       },
-      "url": "https://packages.unity.cn"
+      "url": "https://packages.tuanjie.cn"
     },
     "com.unity.testtools.codecoverage": {
       "version": "1.2.6",
@@ -93,16 +115,16 @@
         "com.unity.test-framework": "1.0.16",
         "com.unity.settings-manager": "1.0.1"
       },
-      "url": "https://packages.unity.cn"
+      "url": "https://packages.tuanjie.cn"
     },
     "com.unity.textmeshpro": {
-      "version": "3.0.7",
+      "version": "3.0.9",
       "depth": 0,
       "source": "registry",
       "dependencies": {
         "com.unity.ugui": "1.0.0"
       },
-      "url": "https://packages.unity.cn"
+      "url": "https://packages.tuanjie.cn"
     },
     "com.unity.timeline": {
       "version": "1.7.7",
@@ -114,7 +136,7 @@
         "com.unity.modules.animation": "1.0.0",
         "com.unity.modules.particlesystem": "1.0.0"
       },
-      "url": "https://packages.unity.cn"
+      "url": "https://packages.tuanjie.cn"
     },
     "com.unity.ugui": {
       "version": "1.0.0",
@@ -133,7 +155,7 @@
         "com.unity.ugui": "1.0.0",
         "com.unity.modules.jsonserialize": "1.0.0"
       },
-      "url": "https://packages.unity.cn"
+      "url": "https://packages.tuanjie.cn"
     },
     "com.unity.modules.ai": {
       "version": "1.0.0",

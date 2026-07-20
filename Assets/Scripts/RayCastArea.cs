@@ -87,9 +87,11 @@ public class RayCastArea : Image
         if (onExit != null) onPointerExit -= onExit;
     }
 
-    void OnDestroy()
+    protected override void OnDestroy()
     {
         onPointerEnter = null;
         onPointerExit = null;
+
+        base.OnDestroy();
     }
 }

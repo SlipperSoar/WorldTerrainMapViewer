@@ -3,6 +3,8 @@ Shader "Custom/EarthSurfaceLitShader"
     Properties
     {
         _MainTex ("Texture", 2D) = "white" {}
+        _HeightTex ("Height Map", 2D) = "white" {}
+        _HeightScale ("Height Scale", Range(0, 0.3)) = 0.0
         _Color ("Color", Color) = (1,1,1,1)
         _Specular ("Specular", Color) = (0.2,0.2,0.2,1)
         _Glossiness ("Glossiness", Range(0, 1)) = 0.5
@@ -35,44 +37,88 @@ Shader "Custom/EarthSurfaceLitShader"
             struct v2f
             {
                 float2 uv : TEXCOORD0;
-                UNITY_FOG_COORDS(1)
+                float2 finalUV : TEXCOORD1;
+                UNITY_FOG_COORDS(2)
                 float4 vertex : SV_POSITION;
-                float3 localPos : TEXCOORD2;
                 float3 worldNormal : TEXCOORD3;
                 float3 worldPos : TEXCOORD4;
             };
 
             sampler2D _MainTex;
             float4 _MainTex_ST;
+            sampler2D _HeightTex;
+            float4 _HeightTex_TexelSize;
+            float _HeightScale;
             fixed4 _Color;
             fixed4 _Specular;
             float _Glossiness;
 
+            float2 EquirectangularUV(float3 localPos)
+            {
+                float3 p = normalize(localPos);
+                float longitude = atan2(p.x, p.z);
+                float latitude = asin(p.y);
+                float u = longitude / (2.0 * 3.14159265358979) + 0.5;
+                float vCoord = latitude / 3.14159265358979 + 0.5;
+                return float2(u, 1.0 - vCoord);
+            }
+
+            float3 SphereFromUV(float2 uv)
+            {
+                float lon = (uv.x - 0.5) * 2.0 * 3.14159265358979;
+                float lat = (0.5 - uv.y) * 3.14159265358979;
+                float cosLat = cos(lat);
+                return float3(cosLat * cos(lon), sin(lat), cosLat * sin(lon));
+            }
+
+            float GetDisplacedHeight(float2 uv)
+            {
+                return tex2Dlod(_HeightTex, float4(uv, 0, 0)).r * 2.0 - 1.0;
+            }
+
             v2f vert (appdata v)
             {
                 v2f o;
-                o.vertex = UnityObjectToClipPos(v.vertex);
-                o.localPos = v.vertex.xyz;
+
+                float2 heightUV = EquirectangularUV(v.vertex.xyz);
+                o.finalUV = heightUV;
+
+                float h = GetDisplacedHeight(heightUV);
+                float radius = length(v.vertex.xyz);
+                float3 n = normalize(v.vertex.xyz);
+                float3 displaced = v.vertex.xyz + n * h * _HeightScale * radius;
+
+                float du = _HeightTex_TexelSize.x * 4.0;
+                float dv = _HeightTex_TexelSize.y * 4.0;
+
+                float2 uvU = float2(heightUV.x + du, heightUV.y);
+                float2 uvV = float2(heightUV.x, heightUV.y + dv);
+
+                float3 posU = SphereFromUV(uvU);
+                float hU = GetDisplacedHeight(uvU);
+                float3 nU = normalize(posU);
+                float3 displacedU = posU + nU * hU * _HeightScale * length(posU);
+
+                float3 posV = SphereFromUV(uvV);
+                float hV = GetDisplacedHeight(uvV);
+                float3 nV = normalize(posV);
+                float3 displacedV = posV + nV * hV * _HeightScale * length(posV);
+
+                float3 tangentU = displacedU - displaced;
+                float3 tangentV = displacedV - displaced;
+                float3 newNormal = normalize(cross(tangentV, tangentU));
+
+                o.vertex = UnityObjectToClipPos(float4(displaced, 1.0));
                 o.uv = v.uv;
-                o.worldNormal = UnityObjectToWorldNormal(v.normal);
-                o.worldPos = mul(unity_ObjectToWorld, v.vertex).xyz;
-                UNITY_TRANSFER_FOG(o,o.vertex);
+                o.worldNormal = UnityObjectToWorldNormal(newNormal);
+                o.worldPos = mul(unity_ObjectToWorld, float4(displaced, 1.0)).xyz;
+                UNITY_TRANSFER_FOG(o, o.vertex);
                 return o;
             }
 
             fixed4 frag (v2f i) : SV_Target
             {
-                float3 pos = normalize(i.localPos);
-                
-                float longitude = atan2(pos.x, pos.z);
-                float latitude = asin(pos.y);
-                
-                float u = longitude / (2.0 * 3.14159265358979) + 0.5;
-                float v_coord = latitude / 3.14159265358979 + 0.5;
-                
-                float2 finalUV = float2(u, 1.0 - v_coord);
-                finalUV = TRANSFORM_TEX(finalUV, _MainTex);
-                
+                float2 finalUV = TRANSFORM_TEX(i.finalUV, _MainTex);
                 fixed4 texColor = tex2D(_MainTex, finalUV);
                 fixed4 col = texColor * _Color;
                 
@@ -124,44 +170,88 @@ Shader "Custom/EarthSurfaceLitShader"
             struct v2f
             {
                 float2 uv : TEXCOORD0;
-                UNITY_FOG_COORDS(1)
+                float2 finalUV : TEXCOORD1;
+                UNITY_FOG_COORDS(2)
                 float4 vertex : SV_POSITION;
-                float3 localPos : TEXCOORD2;
                 float3 worldNormal : TEXCOORD3;
                 float3 worldPos : TEXCOORD4;
             };
 
             sampler2D _MainTex;
             float4 _MainTex_ST;
+            sampler2D _HeightTex;
+            float4 _HeightTex_TexelSize;
+            float _HeightScale;
             fixed4 _Color;
             fixed4 _Specular;
             float _Glossiness;
 
+            float2 EquirectangularUV(float3 localPos)
+            {
+                float3 p = normalize(localPos);
+                float longitude = atan2(p.x, p.z);
+                float latitude = asin(p.y);
+                float u = longitude / (2.0 * 3.14159265358979) + 0.5;
+                float vCoord = latitude / 3.14159265358979 + 0.5;
+                return float2(u, 1.0 - vCoord);
+            }
+
+            float3 SphereFromUV(float2 uv)
+            {
+                float lon = (uv.x - 0.5) * 2.0 * 3.14159265358979;
+                float lat = (0.5 - uv.y) * 3.14159265358979;
+                float cosLat = cos(lat);
+                return float3(cosLat * cos(lon), sin(lat), cosLat * sin(lon));
+            }
+
+            float GetDisplacedHeight(float2 uv)
+            {
+                return tex2Dlod(_HeightTex, float4(uv, 0, 0)).r * 2.0 - 1.0;
+            }
+
             v2f vert (appdata v)
             {
                 v2f o;
-                o.vertex = UnityObjectToClipPos(v.vertex);
-                o.localPos = v.vertex.xyz;
+
+                float2 heightUV = EquirectangularUV(v.vertex.xyz);
+                o.finalUV = heightUV;
+
+                float h = GetDisplacedHeight(heightUV);
+                float radius = length(v.vertex.xyz);
+                float3 n = normalize(v.vertex.xyz);
+                float3 displaced = v.vertex.xyz + n * h * _HeightScale * radius;
+
+                float du = _HeightTex_TexelSize.x * 4.0;
+                float dv = _HeightTex_TexelSize.y * 4.0;
+
+                float2 uvU = float2(heightUV.x + du, heightUV.y);
+                float2 uvV = float2(heightUV.x, heightUV.y + dv);
+
+                float3 posU = SphereFromUV(uvU);
+                float hU = GetDisplacedHeight(uvU);
+                float3 nU = normalize(posU);
+                float3 displacedU = posU + nU * hU * _HeightScale * length(posU);
+
+                float3 posV = SphereFromUV(uvV);
+                float hV = GetDisplacedHeight(uvV);
+                float3 nV = normalize(posV);
+                float3 displacedV = posV + nV * hV * _HeightScale * length(posV);
+
+                float3 tangentU = displacedU - displaced;
+                float3 tangentV = displacedV - displaced;
+                float3 newNormal = normalize(cross(tangentV, tangentU));
+
+                o.vertex = UnityObjectToClipPos(float4(displaced, 1.0));
                 o.uv = v.uv;
-                o.worldNormal = UnityObjectToWorldNormal(v.normal);
-                o.worldPos = mul(unity_ObjectToWorld, v.vertex).xyz;
-                UNITY_TRANSFER_FOG(o,o.vertex);
+                o.worldNormal = UnityObjectToWorldNormal(newNormal);
+                o.worldPos = mul(unity_ObjectToWorld, float4(displaced, 1.0)).xyz;
+                UNITY_TRANSFER_FOG(o, o.vertex);
                 return o;
             }
 
             fixed4 frag (v2f i) : SV_Target
             {
-                float3 pos = normalize(i.localPos);
-                
-                float longitude = atan2(pos.x, pos.z);
-                float latitude = asin(pos.y);
-                
-                float u = longitude / (2.0 * 3.14159265358979) + 0.5;
-                float v_coord = latitude / 3.14159265358979 + 0.5;
-                
-                float2 finalUV = float2(u, 1.0 - v_coord);
-                finalUV = TRANSFORM_TEX(finalUV, _MainTex);
-                
+                float2 finalUV = TRANSFORM_TEX(i.finalUV, _MainTex);
                 fixed4 texColor = tex2D(_MainTex, finalUV);
                 fixed4 col = texColor * _Color;
                 

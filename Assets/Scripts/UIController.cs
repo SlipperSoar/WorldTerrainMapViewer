@@ -785,7 +785,10 @@ public class UIController : MonoBehaviour
         }
 
         if (seed == 0)
+        {
             seed = System.Environment.TickCount;
+            seedInputField.SetTextWithoutNotify(seed.ToString());
+        }
 
         float waterCoverage = waterCoverageSlider != null ? waterCoverageSlider.value : 0.5f;
 

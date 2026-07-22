@@ -27,6 +27,8 @@ Shader "Custom/EarthSurfaceLitShader"
             #include "UnityCG.cginc"
             #include "Lighting.cginc"
 
+            #define PI 3.14159265358979
+
             struct appdata
             {
                 float4 vertex : POSITION;
@@ -37,11 +39,11 @@ Shader "Custom/EarthSurfaceLitShader"
             struct v2f
             {
                 float2 uv : TEXCOORD0;
-                float2 finalUV : TEXCOORD1;
                 UNITY_FOG_COORDS(2)
                 float4 vertex : SV_POSITION;
                 float3 worldNormal : TEXCOORD3;
                 float3 worldPos : TEXCOORD4;
+                float3 localPos : TEXCOORD5;
             };
 
             sampler2D _MainTex;
@@ -58,15 +60,15 @@ Shader "Custom/EarthSurfaceLitShader"
                 float3 p = normalize(localPos);
                 float longitude = atan2(p.x, p.z);
                 float latitude = asin(p.y);
-                float u = longitude / (2.0 * 3.14159265358979) + 0.5;
-                float vCoord = latitude / 3.14159265358979 + 0.5;
+                float u = longitude / (2.0 * PI) + 0.5;
+                float vCoord = latitude / PI + 0.5;
                 return float2(u, 1.0 - vCoord);
             }
 
             float3 SphereFromUV(float2 uv)
             {
-                float lon = (uv.x - 0.5) * 2.0 * 3.14159265358979;
-                float lat = (0.5 - uv.y) * 3.14159265358979;
+                float lon = (uv.x - 0.5) * 2.0 * PI;
+                float lat = (0.5 - uv.y) * PI;
                 float cosLat = cos(lat);
                 return float3(cosLat * cos(lon), sin(lat), cosLat * sin(lon));
             }
@@ -81,7 +83,6 @@ Shader "Custom/EarthSurfaceLitShader"
                 v2f o;
 
                 float2 heightUV = EquirectangularUV(v.vertex.xyz);
-                o.finalUV = heightUV;
 
                 float h = GetDisplacedHeight(heightUV);
                 float radius = length(v.vertex.xyz);
@@ -110,6 +111,7 @@ Shader "Custom/EarthSurfaceLitShader"
 
                 o.vertex = UnityObjectToClipPos(float4(displaced, 1.0));
                 o.uv = v.uv;
+                o.localPos = v.vertex.xyz;
                 o.worldNormal = UnityObjectToWorldNormal(newNormal);
                 o.worldPos = mul(unity_ObjectToWorld, float4(displaced, 1.0)).xyz;
                 UNITY_TRANSFER_FOG(o, o.vertex);
@@ -118,7 +120,12 @@ Shader "Custom/EarthSurfaceLitShader"
 
             fixed4 frag (v2f i) : SV_Target
             {
-                float2 finalUV = TRANSFORM_TEX(i.finalUV, _MainTex);
+                // Compute equirectangular UV per-pixel from the interpolated
+                // local position. This avoids the vertex-level UV interpolation
+                // artifact at the longitude seam where triangles would otherwise
+                // stretch across the entire texture width.
+                float2 finalUV = EquirectangularUV(i.localPos);
+                finalUV = TRANSFORM_TEX(finalUV, _MainTex);
                 fixed4 texColor = tex2D(_MainTex, finalUV);
                 fixed4 col = texColor * _Color;
                 
@@ -160,6 +167,8 @@ Shader "Custom/EarthSurfaceLitShader"
             #include "UnityCG.cginc"
             #include "Lighting.cginc"
 
+            #define PI 3.14159265358979
+
             struct appdata
             {
                 float4 vertex : POSITION;
@@ -170,11 +179,11 @@ Shader "Custom/EarthSurfaceLitShader"
             struct v2f
             {
                 float2 uv : TEXCOORD0;
-                float2 finalUV : TEXCOORD1;
                 UNITY_FOG_COORDS(2)
                 float4 vertex : SV_POSITION;
                 float3 worldNormal : TEXCOORD3;
                 float3 worldPos : TEXCOORD4;
+                float3 localPos : TEXCOORD5;
             };
 
             sampler2D _MainTex;
@@ -191,15 +200,15 @@ Shader "Custom/EarthSurfaceLitShader"
                 float3 p = normalize(localPos);
                 float longitude = atan2(p.x, p.z);
                 float latitude = asin(p.y);
-                float u = longitude / (2.0 * 3.14159265358979) + 0.5;
-                float vCoord = latitude / 3.14159265358979 + 0.5;
+                float u = longitude / (2.0 * PI) + 0.5;
+                float vCoord = latitude / PI + 0.5;
                 return float2(u, 1.0 - vCoord);
             }
 
             float3 SphereFromUV(float2 uv)
             {
-                float lon = (uv.x - 0.5) * 2.0 * 3.14159265358979;
-                float lat = (0.5 - uv.y) * 3.14159265358979;
+                float lon = (uv.x - 0.5) * 2.0 * PI;
+                float lat = (0.5 - uv.y) * PI;
                 float cosLat = cos(lat);
                 return float3(cosLat * cos(lon), sin(lat), cosLat * sin(lon));
             }
@@ -214,7 +223,6 @@ Shader "Custom/EarthSurfaceLitShader"
                 v2f o;
 
                 float2 heightUV = EquirectangularUV(v.vertex.xyz);
-                o.finalUV = heightUV;
 
                 float h = GetDisplacedHeight(heightUV);
                 float radius = length(v.vertex.xyz);
@@ -243,6 +251,7 @@ Shader "Custom/EarthSurfaceLitShader"
 
                 o.vertex = UnityObjectToClipPos(float4(displaced, 1.0));
                 o.uv = v.uv;
+                o.localPos = v.vertex.xyz;
                 o.worldNormal = UnityObjectToWorldNormal(newNormal);
                 o.worldPos = mul(unity_ObjectToWorld, float4(displaced, 1.0)).xyz;
                 UNITY_TRANSFER_FOG(o, o.vertex);
@@ -251,7 +260,8 @@ Shader "Custom/EarthSurfaceLitShader"
 
             fixed4 frag (v2f i) : SV_Target
             {
-                float2 finalUV = TRANSFORM_TEX(i.finalUV, _MainTex);
+                float2 finalUV = EquirectangularUV(i.localPos);
+                finalUV = TRANSFORM_TEX(finalUV, _MainTex);
                 fixed4 texColor = tex2D(_MainTex, finalUV);
                 fixed4 col = texColor * _Color;
                 

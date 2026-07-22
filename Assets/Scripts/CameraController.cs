@@ -7,7 +7,7 @@ public class CameraController : MonoBehaviour
     #region Properties
 
     [SerializeField] private SunLightController sunLightController;
-    
+
     [SerializeField] private Transform target;
     [SerializeField] private float distance = 10f;
     [SerializeField] private float minDistance = 2f;
@@ -20,6 +20,7 @@ public class CameraController : MonoBehaviour
     [SerializeField] private float minY = -80f;
     [SerializeField] private float maxY = 80f;
 
+    private Quaternion orbitRotation = Quaternion.identity;
     private Vector3 offset;
 
     #endregion
@@ -34,10 +35,10 @@ public class CameraController : MonoBehaviour
 
         offset = transform.position - target.position;
 
-        Vector3 angles = Quaternion.LookRotation(offset).eulerAngles;
-        currentX = angles.y;
-        currentY = angles.x;
+        // Initialize orbit rotation from current camera offset relative to target.
+        orbitRotation = Quaternion.LookRotation(-offset.normalized, Vector3.up);
 
+        UpdateDisplayAngles();
         UpdateCameraPosition();
     }
 
@@ -54,7 +55,6 @@ public class CameraController : MonoBehaviour
     private void HandleScrollWheel()
     {
         float scroll = Input.GetAxis("Mouse ScrollWheel");
-
         if (scroll != 0)
         {
             distance -= scroll * scrollSpeed;
@@ -69,11 +69,36 @@ public class CameraController : MonoBehaviour
             float mouseX = Input.GetAxis("Mouse X") * rotationSpeed * Time.deltaTime;
             float mouseY = Input.GetAxis("Mouse Y") * rotationSpeed * Time.deltaTime;
 
-            currentX += mouseX;
-            currentY -= mouseY;
+            // Incremental quaternion rotation — avoids gimbal lock at poles:
+            // Yaw around world up (horizontal orbit, axis always well-defined)
+            // Pitch around camera local right (vertical orbit, axis always well-defined)
+            Quaternion yaw = Quaternion.AngleAxis(mouseX, Vector3.up);
+            Quaternion pitch = Quaternion.AngleAxis(-mouseY, Vector3.right);
 
-            currentY = Mathf.Clamp(currentY, minY, maxY);
+            Quaternion candidate = yaw * orbitRotation * pitch;
+
+            // Prevent the camera from flipping past the poles by ensuring
+            // the camera's up vector remains in the upper hemisphere
+            Vector3 camUp = candidate * Vector3.up;
+            if (camUp.y >= 0f)
+            {
+                orbitRotation = candidate;
+            }
+            else
+            {
+                // At pole limit: apply yaw only, skip the pitch that would flip
+                orbitRotation = yaw * orbitRotation;
+            }
+
+            UpdateDisplayAngles();
         }
+    }
+
+    private void UpdateDisplayAngles()
+    {
+        Vector3 angles = orbitRotation.eulerAngles;
+        currentX = angles.y;
+        currentY = angles.x > 180f ? angles.x - 360f : angles.x;
     }
 
     private void UpdateCameraPosition()
@@ -81,11 +106,10 @@ public class CameraController : MonoBehaviour
         if (target == null)
             return;
 
-        Quaternion rotation = Quaternion.Euler(currentY, currentX, 0);
         Vector3 direction = new Vector3(0, 0, -distance);
-
-        transform.position = target.position + rotation * direction;
-        transform.LookAt(target);
+        transform.position = target.position + orbitRotation * direction;
+        // Set rotation directly from orbitRotation — avoids LookAt gimbal lock at poles
+        transform.rotation = orbitRotation;
     }
 
     public float GetHorizontalRotation()
@@ -99,32 +123,32 @@ public class CameraController : MonoBehaviour
     }
 
     /// <summary>
-    /// 赤道视角
+    /// 赤道视角（世界空间水平视角，与星球倾角无关）
     /// </summary>
     public void SetEquatorView()
     {
-        currentY = sunLightController.AxialTilt;
-        currentX = 0f;
+        orbitRotation = Quaternion.identity;
+        UpdateDisplayAngles();
         UpdateCameraPosition();
     }
 
     /// <summary>
-    /// 北极视角
+    /// 北极视角（世界空间顶部俯视，与星球倾角无关）
     /// </summary>
     public void SetNorthPoleView()
     {
-        currentY = 90f - sunLightController.AxialTilt;
-        currentX = 90f;
+        orbitRotation = Quaternion.Euler(90f, 0f, 0f);
+        UpdateDisplayAngles();
         UpdateCameraPosition();
     }
 
     /// <summary>
-    /// 南极视角
+    /// 南极视角（世界空间底部仰视，与星球倾角无关）
     /// </summary>
     public void SetSouthPoleView()
     {
-        currentY = -90f - sunLightController.AxialTilt;
-        currentX = 90f;
+        orbitRotation = Quaternion.Euler(-90f, 0f, 0f);
+        UpdateDisplayAngles();
         UpdateCameraPosition();
     }
 
@@ -133,7 +157,8 @@ public class CameraController : MonoBehaviour
     /// </summary>
     public void SetTopDownView()
     {
-        currentY = 90f;
+        orbitRotation = Quaternion.Euler(90f, 0f, 0f);
+        UpdateDisplayAngles();
         UpdateCameraPosition();
     }
 }

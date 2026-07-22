@@ -1,0 +1,473 @@
+/* === MainUI.uss — Dark glassmorphism theme === */
+
+/* ── Root ── */
+#root {
+    flex-grow: 1;
+    background-color: rgba(0, 0, 0, 0);
+}
+
+/* ── Slide Panel (left side) ── */
+#slide-panel {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 340px;
+    background-color: rgba(15, 18, 28, 0.92);
+    border-right-width: 1px;
+    border-right-color: rgba(255, 255, 255, 0.08);
+    padding: 12px;
+    overflow: scroll;
+}
+
+.panel-header {
+    font-size: 16px;
+    color: #4ECDC4;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom-width: 1px;
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+    letter-spacing: 1px;
+}
+
+.section-label {
+    color: #888;
+    font-size: 12px;
+    margin-bottom: 4px;
+}
+
+/* ── Map List ── */
+#map-list {
+    margin-bottom: 12px;
+    max-height: 200px;
+    min-height: 60px;
+    overflow: scroll;
+    background-color: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    padding: 4px;
+}
+
+.map-item {
+    background-color: rgba(30, 35, 50, 0.9);
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 4px;
+    color: #E8E8E8;
+    font-size: 14px;
+}
+
+.map-item:hover {
+    background-color: rgba(78, 205, 196, 0.15);
+    border-color: rgba(78, 205, 196, 0.4);
+}
+
+.map-item:active {
+    background-color: rgba(78, 205, 196, 0.3);
+}
+
+#map-file-name {
+    color: #888;
+    font-size: 12px;
+    margin-bottom: 8px;
+}
+
+/* ── World Gen Section ── */
+#worldgen-section {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top-width: 1px;
+    border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+#seed-row {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+#seed-input {
+    flex-grow: 1;
+    background-color: rgba(0, 0, 0, 0.3);
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    color: #E8E8E8;
+    padding: 4px 8px;
+    font-size: 14px;
+    margin-right: 4px;
+}
+
+#seed-input > .unity-text-field__input {
+    color: #080808;
+    font-size: 14px;
+}
+
+#seed-input:focus {
+    border-color: #4ECDC4;
+}
+
+#seed-input:focus > .unity-text-field__input {
+    color: #080808;
+}
+
+#seed-random-btn {
+    background-color: rgba(30, 35, 50, 0.9);
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    color: #4ECDC4;
+    padding: 4px 10px;
+    font-size: 12px;
+}
+
+#seed-random-btn:hover {
+    background-color: rgba(78, 205, 196, 0.15);
+}
+
+#water-row {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+#water-row > Label {
+    color: #888;
+    font-size: 12px;
+    width: 60px;
+}
+
+#water-slider {
+    flex-grow: 1;
+    margin-right: 4px;
+}
+
+#water-value {
+    color: #4ECDC4;
+    font-size: 12px;
+    width: 36px;
+    -unity-text-align: middle-right;
+}
+
+#generate-button {
+    background-color: rgba(78, 205, 196, 0.3);
+    border-width: 1px;
+    border-color: #4ECDC4;
+    border-radius: 6px;
+    color: #4ECDC4;
+    font-size: 14px;
+    padding: 8px;
+}
+
+#generate-button:hover {
+    background-color: rgba(78, 205, 196, 0.15);
+}
+
+#generate-button:active {
+    background-color: #4ECDC4;
+    color: white;
+}
+
+#gen-progress-label {
+    color: #888;
+    font-size: 12px;
+    margin-top: 4px;
+    -unity-text-align: middle-center;
+}
+
+/* ── Marker List ── */
+#marker-list-section {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top-width: 1px;
+    border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+#marker-list {
+    max-height: 150px;
+    min-height: 40px;
+    overflow: scroll;
+    background-color: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    padding: 4px;
+}
+
+.marker-item {
+    flex-direction: row;
+    align-items: center;
+    background-color: rgba(30, 35, 50, 0.9);
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 4px 8px;
+    margin-bottom: 3px;
+}
+
+.marker-item > Label {
+    color: #E8E8E8;
+    font-size: 12px;
+    flex-grow: 1;
+}
+
+.marker-color-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 8px;
+    flex-shrink: 0;
+}
+
+.marker-delete-btn {
+    background-color: rgba(231, 76, 60, 0.15);
+    border-width: 1px;
+    border-color: rgba(231, 76, 60, 0.3);
+    border-radius: 4px;
+    color: #E74C3C;
+    font-size: 11px;
+    padding: 2px 8px;
+    flex-shrink: 0;
+}
+
+.marker-delete-btn:hover {
+    background-color: rgba(231, 76, 60, 0.3);
+}
+
+/* ── Top Bar ── */
+#top-bar {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    margin-left: -280px;
+    width: 560px;
+    flex-direction: row;
+    align-items: center;
+    background-color: rgba(15, 18, 28, 0.92);
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 6px 12px;
+}
+
+.top-section {
+    flex-direction: row;
+    align-items: center;
+    margin-right: 8px;
+}
+
+.top-section > Label {
+    color: #888;
+    font-size: 12px;
+    margin-right: 6px;
+}
+
+#time-slider {
+    width: 140px;
+}
+
+#season-slider {
+    width: 100px;
+}
+
+.slider-value {
+    color: #4ECDC4;
+    font-size: 12px;
+    margin-left: 4px;
+    min-width: 40px;
+    -unity-text-align: middle-right;
+}
+
+#autocycle-toggle {
+    margin-right: 16px;
+    margin-left: 4px;
+}
+
+#autocycle-toggle > Label {
+    color: #E8E8E8;
+    font-size: 12px;
+}
+
+/* ── Right Bar ── */
+#right-bar {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 140px;
+    background-color: rgba(15, 18, 28, 0.92);
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 8px;
+}
+
+#exit-button {
+    background-color: rgba(231, 76, 60, 0.15);
+    border-width: 1px;
+    border-color: rgba(231, 76, 60, 0.4);
+    border-radius: 6px;
+    color: #E74C3C;
+    font-size: 14px;
+    padding: 6px;
+    margin-bottom: 8px;
+}
+
+#exit-button:hover {
+    background-color: rgba(231, 76, 60, 0.3);
+}
+
+#exit-button:active {
+    background-color: #E74C3C;
+    color: white;
+}
+
+.view-button {
+    background-color: rgba(30, 35, 50, 0.9);
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    color: #E8E8E8;
+    font-size: 14px;
+    padding: 6px;
+    margin-bottom: 4px;
+}
+
+.view-button:hover {
+    background-color: rgba(78, 205, 196, 0.15);
+    border-color: rgba(78, 205, 196, 0.4);
+}
+
+.view-button:active {
+    background-color: rgba(78, 205, 196, 0.3);
+}
+
+/* ── Status Panel ── */
+#status-panel {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top-width: 1px;
+    border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+.status-row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+
+.status-label {
+    color: #888;
+    font-size: 12px;
+}
+
+.status-value {
+    color: #4ECDC4;
+    font-size: 12px;
+}
+
+/* ── Bottom Bar ── */
+#bottom-bar {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    margin-left: -300px;
+    width: 600px;
+    flex-direction: row;
+    align-items: center;
+    background-color: rgba(15, 18, 28, 0.92);
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 6px 10px;
+}
+
+#color-palette {
+    flex-direction: row;
+    margin-right: 16px;
+}
+
+.color-button {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border-width: 2px;
+    border-color: rgba(0, 0, 0, 0);
+    margin-right: 3px;
+}
+
+.color-button:hover {
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+.color-button--selected {
+    border-color: #4ECDC4;
+}
+
+.color-number {
+    color: white;
+    font-size: 11px;
+    -unity-text-align: middle-center;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+}
+
+#current-color-label {
+    color: #888;
+    font-size: 12px;
+    margin-right: 6px;
+    white-space: nowrap;
+}
+
+#current-color-swatch {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.08);
+    margin-right: 12px;
+    flex-shrink: 0;
+}
+
+#clear-markers-button {
+    background-color: rgba(30, 35, 50, 0.9);
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    color: #888;
+    font-size: 12px;
+    padding: 4px 10px;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+#clear-markers-button:hover {
+    background-color: rgba(78, 205, 196, 0.15);
+    color: #E8E8E8;
+}
+
+/* ── Hover Zone ── */
+#hover-zone {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 20px;
+    background-color: rgba(0, 0, 0, 0);
+}
+
+/* ── Slider overrides ── */
+Slider {
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
+/* ── Empty state text ── */
+.empty-text {
+    color: #888;
+    font-size: 12px;
+    padding: 12px;
+    -unity-text-align: middle-center;
+}

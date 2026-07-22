@@ -1,0 +1,70 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" engine="UnityEngine.UIElements" editor-extension-mode="False">
+    <ui:VisualElement name="root">
+        <Style src="project://database/Assets/UI/MainUI.uss?fileID=7433441132597879392&amp;guid=53c8f3eb8b1e24a47b91c3981889202c&amp;type=3#MainUI" />
+        <ui:VisualElement name="slide-panel">
+            <ui:Label text="地形图管理" class="panel-header" />
+            <ui:Label text="地图列表" class="section-label" />
+            <ui:ScrollView name="map-list" style="height: 228px;" />
+            <ui:Label name="map-file-name" text="(未选择)" class="empty-text" />
+            <ui:VisualElement name="worldgen-section">
+                <ui:Label text="世界生成" class="panel-header" />
+                <ui:VisualElement name="seed-row">
+                    <ui:TextField name="seed-input" style="width: 269px;" />
+                    <ui:Button name="seed-random-btn" text="随机" />
+                </ui:VisualElement>
+                <ui:VisualElement name="water-row">
+                    <ui:Label text="水面占比" />
+                    <ui:Slider name="water-slider" low-value="0.1" high-value="0.9" value="0.5" style="width: 167px;" />
+                    <ui:Label name="water-value" text="50%" />
+                </ui:VisualElement>
+                <ui:Button name="generate-button" text="生成新世界" />
+                <ui:Label name="gen-progress-label" />
+            </ui:VisualElement>
+            <ui:VisualElement name="marker-list-section" style="height: 456px;">
+                <ui:Label text="标记点列表" class="panel-header" />
+                <ui:ScrollView name="marker-list" style="height: 287px;" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+        <ui:VisualElement name="top-bar" style="width: 656px;">
+            <ui:VisualElement class="top-section">
+                <ui:Label text="时间" />
+                <ui:Slider name="time-slider" low-value="0" high-value="24" value="0" />
+                <ui:Label name="time-value" text="0.0h" class="slider-value" />
+            </ui:VisualElement>
+            <ui:Toggle name="autocycle-toggle" label="自动流动" value="true" />
+            <ui:VisualElement class="top-section">
+                <ui:Label text="季节" />
+                <ui:Slider name="season-slider" low-value="0" high-value="40" value="0" />
+                <ui:Label name="season-value" text="春0/10" class="slider-value" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+        <ui:VisualElement name="right-bar">
+            <ui:Button name="exit-button" text="退出" />
+            <ui:Button name="north-button" text="北极" class="view-button" />
+            <ui:Button name="equator-button" text="赤道" class="view-button" />
+            <ui:Button name="south-button" text="南极" class="view-button" />
+            <ui:Button name="top-button" text="俯视" class="view-button" />
+            <ui:VisualElement name="status-panel">
+                <ui:VisualElement class="status-row">
+                    <ui:Label text="旋转" class="status-label" />
+                    <ui:Label name="rotation-value" text="H: 0° V: 0°" class="status-value" />
+                </ui:VisualElement>
+                <ui:VisualElement class="status-row">
+                    <ui:Label text="时间" class="status-label" />
+                    <ui:Label name="time-status" text="—" class="status-value" />
+                </ui:VisualElement>
+                <ui:VisualElement class="status-row">
+                    <ui:Label text="季节" class="status-label" />
+                    <ui:Label name="season-status" text="—" class="status-value" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+        </ui:VisualElement>
+        <ui:VisualElement name="bottom-bar">
+            <ui:VisualElement name="color-palette" />
+            <ui:Label name="current-color-label" text="当前颜色: 0" />
+            <ui:VisualElement name="current-color-swatch" />
+            <ui:Button name="clear-markers-button" text="清除标记" />
+        </ui:VisualElement>
+        <ui:VisualElement name="hover-zone" />
+    </ui:VisualElement>
+</ui:UXML>

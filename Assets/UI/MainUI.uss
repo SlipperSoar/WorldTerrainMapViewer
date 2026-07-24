@@ -17,7 +17,7 @@
     border-right-width: 1px;
     border-right-color: rgba(255, 255, 255, 0.08);
     padding: 12px;
-    overflow: scroll;
+    overflow: hidden;
 }
 
 .panel-header {
@@ -39,7 +39,8 @@
 /* ── Map List ── */
 #map-list {
     margin-bottom: 12px;
-    max-height: 200px;
+    flex-grow: 1;
+    flex-shrink: 1;
     min-height: 60px;
     overflow: scroll;
     background-color: rgba(0, 0, 0, 0.2);
@@ -178,6 +179,9 @@
 
 /* ── Marker List ── */
 #marker-list-section {
+    flex-grow: 2;
+    flex-shrink: 1;
+    min-height: 0;
     margin-top: 12px;
     padding-top: 10px;
     border-top-width: 1px;
@@ -185,7 +189,8 @@
 }
 
 #marker-list {
-    max-height: 150px;
+    flex-grow: 1;
+    flex-shrink: 1;
     min-height: 40px;
     overflow: scroll;
     background-color: rgba(0, 0, 0, 0.2);
@@ -235,11 +240,8 @@
 
 /* ── Top Bar ── */
 #top-bar {
-    position: absolute;
-    top: 8px;
-    left: 50%;
-    margin-left: -280px;
-    width: 560px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
     flex-direction: row;
     align-items: center;
     background-color: rgba(15, 18, 28, 0.92);
@@ -367,11 +369,8 @@
 
 /* ── Bottom Bar ── */
 #bottom-bar {
-    position: absolute;
-    bottom: 8px;
-    left: 50%;
-    margin-left: -300px;
-    width: 600px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
     flex-direction: row;
     align-items: center;
     background-color: rgba(15, 18, 28, 0.92);

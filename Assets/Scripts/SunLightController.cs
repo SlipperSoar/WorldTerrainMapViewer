@@ -133,7 +133,7 @@ public class SunLightController : MonoBehaviour
 
         if (enableSeasons)
         {
-            float seasonOffset = Mathf.Sin(yearProgress * Mathf.PI * 2f) * axialTilt;
+            float seasonOffset = axialTilt * (1f + Mathf.Sin(yearProgress * Mathf.PI * 2f));
             sunDirection = Quaternion.Euler(seasonOffset, 0, 0) * sunDirection;
         }
 
@@ -147,7 +147,7 @@ public class SunLightController : MonoBehaviour
         float seasonOffset = 0f;
         if (enableSeasons)
         {
-            seasonOffset = Mathf.Sin(yearProgress * Mathf.PI * 2f) * axialTilt;
+            seasonOffset = axialTilt * (1f + Mathf.Sin(yearProgress * Mathf.PI * 2f));
         }
 
         transform.rotation = Quaternion.Euler(dayAngle, seasonOffset, 0);

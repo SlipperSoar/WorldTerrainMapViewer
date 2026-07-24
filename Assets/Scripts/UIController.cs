@@ -102,6 +102,7 @@ public class UIController : MonoBehaviour
         QueryElements();
         RegisterCallbacks();
         InitializeSliders();
+        InitializeSeasonSliderColors();
         InitializeAutoCycleToggle();
         InitializeColorPalette();
         InitializeWorldGeneration();
@@ -500,6 +501,35 @@ public class UIController : MonoBehaviour
             });
             _seasonValue.text = FormatSeasonDisplay((int)_seasonSlider.value);
         }
+    }
+
+    private void InitializeSeasonSliderColors()
+    {
+        if (_seasonSlider == null) return;
+
+        var track = _seasonSlider.Q<VisualElement>(className: "unity-base-slider__tracker");
+        if (track == null) return;
+
+        var bg = new VisualElement();
+        bg.style.flexDirection = FlexDirection.Row;
+        bg.style.position = Position.Absolute;
+        bg.style.left = 0;
+        bg.style.right = 0;
+        bg.style.top = 0;
+        bg.style.bottom = 0;
+        bg.style.overflow = Overflow.Hidden;
+
+        Color[] seasonColors = { new Color(0.3f, 0.7f, 0.2f, 0.6f), new Color(0.8f, 0.3f, 0.2f, 0.6f), new Color(0.8f, 0.6f, 0.1f, 0.6f), new Color(0.3f, 0.5f, 0.8f, 0.6f) };
+        for (int i = 0; i < 4; i++)
+        {
+            var section = new VisualElement();
+            section.style.flexGrow = 1;
+            section.style.backgroundColor = seasonColors[i];
+            bg.Add(section);
+        }
+
+        track.Add(bg);
+        bg.SendToBack();
     }
 
     private void UpdateSlidersDisplay()

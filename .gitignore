@@ -77,3 +77,4 @@ crashlytics-build.properties
 
 # Unity Codely
 .codely-cli/
+screenshots/

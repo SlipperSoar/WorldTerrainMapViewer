@@ -1,10 +1,10 @@
 {
-  "unity_port": 44500,
-  "stream_port": 39620,
+  "unity_port": 55570,
+  "stream_port": 36726,
   "created_date": "2026-07-20T00:34:57.486Z",
   "project_path": "D:/Porjects/Github/WorldTerrainMapViewer/Assets",
   "reloading": false,
   "reason": "ready",
-  "seq": 2602,
-  "last_heartbeat": "2026-07-24T19:18:51.583Z"
+  "seq": 290,
+  "last_heartbeat": "2026-07-24T19:36:00.651Z"
 }

@@ -48,6 +48,7 @@ public class UIController : MonoBehaviour
     private Label _currentColorLabel;
     private VisualElement _currentColorSwatch;
     private Button _clearMarkersButton;
+    private int _lastColorIndex = -1;
 
     // State
     private bool _isUpdatingTimeSlider = false;
@@ -295,6 +296,7 @@ public class UIController : MonoBehaviour
             int displayNum = (i == 9) ? 0 : i + 1;
             var numLabel = new Label(displayNum.ToString());
             numLabel.AddToClassList("color-number");
+            numLabel.style.color = GetReadableTextColor(color);
             btn.Add(numLabel);
 
             btn.clicked += () =>
@@ -326,6 +328,12 @@ public class UIController : MonoBehaviour
         }
     }
 
+    private static Color GetReadableTextColor(Color backgroundColor)
+    {
+        float luminance = backgroundColor.r * 0.299f + backgroundColor.g * 0.587f + backgroundColor.b * 0.114f;
+        return luminance > 0.5f ? Color.black : Color.white;
+    }
+
     private void UpdateCurrentColorDisplay()
     {
         int colorIndex = EarthManager.Instance != null
@@ -340,6 +348,12 @@ public class UIController : MonoBehaviour
 
         if (_currentColorSwatch != null)
             _currentColorSwatch.style.backgroundColor = color;
+
+        if (colorIndex != _lastColorIndex)
+        {
+            _lastColorIndex = colorIndex;
+            UpdateColorPaletteSelection();
+        }
     }
 
     #endregion

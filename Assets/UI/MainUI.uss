@@ -406,6 +406,7 @@
     color: white;
     font-size: 11px;
     -unity-text-align: middle-center;
+    -unity-font-style: bold;
     position: absolute;
     top: 0;
     left: 0;

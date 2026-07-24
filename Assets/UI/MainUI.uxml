@@ -70,6 +70,10 @@
                 <ui:Button name="clear-markers-button" text="清除标记" />
             </ui:VisualElement>
         </ui:VisualElement>
-        <ui:VisualElement name="hover-zone" />
+        <ui:VisualElement name="hover-zone">
+            <ui:VisualElement name="hover-arrow" class="hover-arrow">
+                <ui:VisualElement class="hover-arrow-tip" />
+            </ui:VisualElement>
+        </ui:VisualElement>
     </ui:VisualElement>
 </ui:UXML>

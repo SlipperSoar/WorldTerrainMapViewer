@@ -458,6 +458,38 @@
     background-color: rgba(0, 0, 0, 0);
 }
 
+.hover-arrow {
+    position: absolute;
+    left: 4px;
+    top: 50%;
+    margin-top: -24px;
+    width: 12px;
+    height: 48px;
+    background-color: rgba(78, 205, 196, 0.6);
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s, left 0.2s;
+}
+
+.hover-arrow-tip {
+    width: 0;
+    height: 0;
+    border-top-width: 5px;
+    border-top-color: rgba(0, 0, 0, 0);
+    border-bottom-width: 5px;
+    border-bottom-color: rgba(0, 0, 0, 0);
+    border-left-width: 6px;
+    border-left-style: solid;
+    border-left-color: white;
+}
+
+#hover-zone:hover .hover-arrow {
+    background-color: rgba(78, 205, 196, 0.9);
+    left: 6px;
+}
+
 /* ── Slider overrides ── */
 Slider {
     margin-top: 2px;

@@ -22,6 +22,7 @@ public class UIController : MonoBehaviour
     private VisualElement _root;
     private VisualElement _slidePanel;
     private VisualElement _hoverZone;
+    private VisualElement _hoverArrow;
     private ScrollView _mapList;
     private Label _mapFileName;
     private TextField _seedInput;
@@ -153,6 +154,7 @@ public class UIController : MonoBehaviour
     {
         _slidePanel = _root.Q<VisualElement>("slide-panel");
         _hoverZone = _root.Q<VisualElement>("hover-zone");
+        _hoverArrow = _root.Q<VisualElement>("hover-arrow");
         _mapList = _root.Q<ScrollView>("map-list");
         _mapFileName = _root.Q<Label>("map-file-name");
         _seedInput = _root.Q<TextField>("seed-input");
@@ -240,6 +242,8 @@ public class UIController : MonoBehaviour
             _slidePanel.style.translate = _isPanelVisible
                 ? new Translate(0, 0, 0)
                 : new Translate(-340, 0, 0);
+            if (_hoverArrow != null)
+                _hoverArrow.style.display = _isPanelVisible ? DisplayStyle.None : DisplayStyle.Flex;
         }
     }
 

@@ -747,6 +747,9 @@ public class UIController : MonoBehaviour
 
         if (WorldTerrainGenerator.Instance != null)
         {
+            WorldTerrainGenerator.Instance.onProgress = OnGenerationProgress;
+            WorldTerrainGenerator.Instance.onComplete = OnGenerationComplete;
+            WorldTerrainGenerator.Instance.onError = OnGenerationError;
             WorldTerrainGenerator.Instance.GenerateWorld(seed, 0, waterCoverage);
         }
         else

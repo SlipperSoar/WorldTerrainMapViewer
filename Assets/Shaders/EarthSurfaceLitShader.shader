@@ -70,7 +70,7 @@ Shader "Custom/EarthSurfaceLitShader"
                 float lon = (uv.x - 0.5) * 2.0 * PI;
                 float lat = (0.5 - uv.y) * PI;
                 float cosLat = cos(lat);
-                return float3(cosLat * cos(lon), sin(lat), cosLat * sin(lon));
+                return float3(cosLat * sin(lon), sin(lat), cosLat * cos(lon));
             }
 
             float GetDisplacedHeight(float2 uv)
@@ -95,15 +95,15 @@ Shader "Custom/EarthSurfaceLitShader"
                 float2 uvU = float2(heightUV.x + du, heightUV.y);
                 float2 uvV = float2(heightUV.x, heightUV.y + dv);
 
-                float3 posU = SphereFromUV(uvU);
+                float3 posU = SphereFromUV(uvU) * radius;
                 float hU = GetDisplacedHeight(uvU);
                 float3 nU = normalize(posU);
-                float3 displacedU = posU + nU * hU * _HeightScale * length(posU);
+                float3 displacedU = posU + nU * hU * _HeightScale * radius;
 
-                float3 posV = SphereFromUV(uvV);
+                float3 posV = SphereFromUV(uvV) * radius;
                 float hV = GetDisplacedHeight(uvV);
                 float3 nV = normalize(posV);
-                float3 displacedV = posV + nV * hV * _HeightScale * length(posV);
+                float3 displacedV = posV + nV * hV * _HeightScale * radius;
 
                 float3 tangentU = displacedU - displaced;
                 float3 tangentV = displacedV - displaced;
@@ -210,7 +210,7 @@ Shader "Custom/EarthSurfaceLitShader"
                 float lon = (uv.x - 0.5) * 2.0 * PI;
                 float lat = (0.5 - uv.y) * PI;
                 float cosLat = cos(lat);
-                return float3(cosLat * cos(lon), sin(lat), cosLat * sin(lon));
+                return float3(cosLat * sin(lon), sin(lat), cosLat * cos(lon));
             }
 
             float GetDisplacedHeight(float2 uv)
@@ -235,15 +235,15 @@ Shader "Custom/EarthSurfaceLitShader"
                 float2 uvU = float2(heightUV.x + du, heightUV.y);
                 float2 uvV = float2(heightUV.x, heightUV.y + dv);
 
-                float3 posU = SphereFromUV(uvU);
+                float3 posU = SphereFromUV(uvU) * radius;
                 float hU = GetDisplacedHeight(uvU);
                 float3 nU = normalize(posU);
-                float3 displacedU = posU + nU * hU * _HeightScale * length(posU);
+                float3 displacedU = posU + nU * hU * _HeightScale * radius;
 
-                float3 posV = SphereFromUV(uvV);
+                float3 posV = SphereFromUV(uvV) * radius;
                 float hV = GetDisplacedHeight(uvV);
                 float3 nV = normalize(posV);
-                float3 displacedV = posV + nV * hV * _HeightScale * length(posV);
+                float3 displacedV = posV + nV * hV * _HeightScale * radius;
 
                 float3 tangentU = displacedU - displaced;
                 float3 tangentV = displacedV - displaced;

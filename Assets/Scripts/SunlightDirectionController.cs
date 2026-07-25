@@ -7,6 +7,10 @@ using UnityEditor;
 public class SunlightDirectionController : MonoBehaviour
 {
     [SerializeField] private Light sunLight;
+    [SerializeField] private bool showArrow = true;
+
+    private GameObject _arrowObject;
+    private bool _cachedShowArrow;
 
 #if UNITY_EDITOR
     private void OnEnable()
@@ -40,7 +44,20 @@ public class SunlightDirectionController : MonoBehaviour
         Vector3 lightDirection = sunLight.transform.forward;
 
         // Arrow points along local +X = lightDirection (toward Earth / sunlit side).
-        // Child at local (-5,0,0) = sunDirection side (where the sun is).
+        // Child at local (-15,0,0) = sunDirection side (where the sun is).
         transform.rotation = Quaternion.LookRotation(lightDirection, Vector3.up) * Quaternion.Euler(0f, -90f, 0f);
+
+        if (_cachedShowArrow != showArrow)
+        {
+            _cachedShowArrow = showArrow;
+            if (_arrowObject == null)
+                _arrowObject = transform.GetChild(0).gameObject;
+            _arrowObject.SetActive(showArrow);
+        }
+    }
+
+    public void SetArrowVisible(bool visible)
+    {
+        showArrow = visible;
     }
 }

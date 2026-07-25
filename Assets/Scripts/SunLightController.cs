@@ -11,6 +11,7 @@ public class SunLightController : MonoBehaviour
 
     [SerializeField] private float currentTimeOfDay = 0f;
     [SerializeField] private bool autoCycle = true;
+    [SerializeField, Range(0.1f, 10f)] private float speedMultiplier = 1f;
 
     [Header("Season Settings")] [SerializeField]
     private float yearDuration = 86400f;
@@ -56,6 +57,16 @@ public class SunLightController : MonoBehaviour
     /// </summary>
     public bool IsAutoCycleEnabled => autoCycle;
 
+    /// <summary>
+    /// 时间流速倍率
+    /// </summary>
+    public float SpeedMultiplier => speedMultiplier;
+
+    public void SetSpeedMultiplier(float speed)
+    {
+        speedMultiplier = Mathf.Clamp(speed, 0.1f, 10f);
+    }
+
     #endregion
 
     void Start()
@@ -79,12 +90,12 @@ public class SunLightController : MonoBehaviour
     {
         if (autoCycle)
         {
-            currentTimeOfDay += Time.deltaTime;
+            currentTimeOfDay += Time.deltaTime * speedMultiplier;
             currentTimeOfDay %= dayDuration;
 
             if (enableSeasons)
             {
-                currentDayOfYear += Time.deltaTime;
+                currentDayOfYear += Time.deltaTime * speedMultiplier;
                 currentDayOfYear %= yearDuration;
             }
         }

@@ -157,6 +157,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   cameraController: {fileID: 963194229}
   sunLightController: {fileID: 705507996}
+  sunlightDirectionController: {fileID: 492025026}
 --- !u!114 &421169225
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -247,6 +248,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   sunLight: {fileID: 705507994}
+  showArrow: 1
 --- !u!1 &705507993
 GameObject:
   m_ObjectHideFlags: 0
@@ -359,6 +361,7 @@ MonoBehaviour:
   dayDuration: 240
   currentTimeOfDay: 60
   autoCycle: 0
+  speedMultiplier: 1
   yearDuration: 86400
   currentDayOfYear: 0
   axialTilt: 23.5

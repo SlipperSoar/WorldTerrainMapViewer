@@ -279,14 +279,16 @@
     -unity-text-align: middle-right;
 }
 
-#autocycle-toggle {
+#autocycle-toggle, #arrow-toggle {
     margin-right: 16px;
     margin-left: 4px;
+    flex-shrink: 0;
 }
 
-#autocycle-toggle > Label {
+.unity-toggle__label {
     color: #E8E8E8;
     font-size: 12px;
+    white-space: nowrap;
 }
 
 /* ── Right Bar ── */

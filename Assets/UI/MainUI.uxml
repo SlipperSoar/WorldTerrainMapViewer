@@ -35,6 +35,12 @@
                 </ui:VisualElement>
                 <ui:Toggle name="autocycle-toggle" label="自动流动" value="true" />
                 <ui:VisualElement class="top-section">
+                    <ui:Label text="流速" />
+                    <ui:Slider name="speed-slider" low-value="0.1" high-value="10" value="1" style="width: 80px;" />
+                    <ui:Label name="speed-value" text="1.0x" class="slider-value" />
+                </ui:VisualElement>
+                <ui:Toggle name="arrow-toggle" label="阳光箭头" value="true" style="color: #E8E8E8; font-size: 12px; margin-right: 16px; margin-left: 4px; flex-shrink: 0;" />
+                <ui:VisualElement class="top-section">
                     <ui:Label text="季节" />
                     <ui:Slider name="season-slider" low-value="0" high-value="40" value="0" />
                     <ui:Label name="season-value" text="春0/10" class="slider-value" />

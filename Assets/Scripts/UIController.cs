@@ -17,6 +17,7 @@ public class UIController : MonoBehaviour
     [Header("References")]
     [SerializeField] private CameraController cameraController;
     [SerializeField] private SunLightController sunLightController;
+    [SerializeField] private SunlightDirectionController sunlightDirectionController;
 
     // UIToolkit elements
     private VisualElement _root;
@@ -35,6 +36,9 @@ public class UIController : MonoBehaviour
     private Slider _timeSlider;
     private Label _timeValue;
     private Toggle _autoCycleToggle;
+    private Slider _speedSlider;
+    private Label _speedValue;
+    private Toggle _arrowToggle;
     private Slider _seasonSlider;
     private Label _seasonValue;
     private Button _exitButton;
@@ -104,6 +108,8 @@ public class UIController : MonoBehaviour
         InitializeSliders();
         InitializeSeasonSliderColors();
         InitializeAutoCycleToggle();
+        InitializeSpeedSlider();
+        InitializeArrowToggle();
         InitializeColorPalette();
         InitializeWorldGeneration();
         InitializeViewButtons();
@@ -168,6 +174,9 @@ public class UIController : MonoBehaviour
         _timeSlider = _root.Q<Slider>("time-slider");
         _timeValue = _root.Q<Label>("time-value");
         _autoCycleToggle = _root.Q<Toggle>("autocycle-toggle");
+        _speedSlider = _root.Q<Slider>("speed-slider");
+        _speedValue = _root.Q<Label>("speed-value");
+        _arrowToggle = _root.Q<Toggle>("arrow-toggle");
         _seasonSlider = _root.Q<Slider>("season-slider");
         _seasonValue = _root.Q<Label>("season-value");
         _exitButton = _root.Q<Button>("exit-button");
@@ -438,6 +447,43 @@ public class UIController : MonoBehaviour
         _autoCycleToggle.RegisterValueChangedCallback(evt =>
         {
             sunLightController.ToggleAutoCycle(evt.newValue);
+        });
+    }
+
+    private void InitializeSpeedSlider()
+    {
+        if (_speedSlider == null || sunLightController == null)
+            return;
+
+        _speedSlider.value = sunLightController.SpeedMultiplier;
+        _speedSlider.RegisterValueChangedCallback(evt =>
+        {
+            sunLightController.SetSpeedMultiplier(evt.newValue);
+            if (_speedValue != null)
+                _speedValue.text = evt.newValue.ToString("F1") + "x";
+        });
+        if (_speedValue != null)
+            _speedValue.text = _speedSlider.value.ToString("F1") + "x";
+    }
+
+    private void InitializeArrowToggle()
+    {
+        if (_arrowToggle == null)
+            return;
+
+        var arrowLabel = _arrowToggle.Q<Label>();
+        if (arrowLabel != null)
+        {
+            arrowLabel.style.color = new Color(0.91f, 0.91f, 0.91f, 1f);
+            arrowLabel.style.fontSize = 12;
+            arrowLabel.style.whiteSpace = WhiteSpace.NoWrap;
+        }
+
+        _arrowToggle.value = true;
+        _arrowToggle.RegisterValueChangedCallback(evt =>
+        {
+            if (sunlightDirectionController != null)
+                sunlightDirectionController.SetArrowVisible(evt.newValue);
         });
     }
 

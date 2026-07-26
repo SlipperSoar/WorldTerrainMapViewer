@@ -53,8 +53,8 @@ public class UIController : MonoBehaviour
     private Label _currentColorLabel;
     private VisualElement _currentColorSwatch;
     private Button _clearMarkersButton;
+    private Toggle _plateOverlayToggle;
     private int _lastColorIndex = -1;
-
     // State
     private bool _isUpdatingTimeSlider = false;
     private bool _isUpdatingSeasonSlider = false;
@@ -110,6 +110,7 @@ public class UIController : MonoBehaviour
         InitializeAutoCycleToggle();
         InitializeSpeedSlider();
         InitializeArrowToggle();
+        InitializePlateOverlayToggle();
         InitializeColorPalette();
         InitializeWorldGeneration();
         InitializeViewButtons();
@@ -487,6 +488,32 @@ public class UIController : MonoBehaviour
         });
     }
 
+    private void InitializePlateOverlayToggle()
+    {
+        if (_arrowToggle == null || _arrowToggle.parent == null)
+            return;
+
+        // Create the toggle programmatically to avoid UXML rendering issues
+        _plateOverlayToggle = new Toggle("断层带");
+        _plateOverlayToggle.name = "plate-overlay-toggle";
+        _plateOverlayToggle.value = true;
+        _plateOverlayToggle.style.fontSize = 12;
+        _plateOverlayToggle.style.marginRight = 16;
+        _plateOverlayToggle.style.marginLeft = 4;
+        _plateOverlayToggle.style.flexShrink = 0;
+
+        // Insert after the arrow toggle
+        var parent = _arrowToggle.parent;
+        int arrowIndex = parent.IndexOf(_arrowToggle);
+        parent.Insert(arrowIndex + 1, _plateOverlayToggle);
+
+        _plateOverlayToggle.RegisterValueChangedCallback(evt =>
+        {
+            if (EarthManager.Instance != null)
+                EarthManager.Instance.SetPlateOverlayVisible(evt.newValue);
+        });
+    }
+
     private void UpdateAutoCycleToggleDisplay()
     {
         if (_autoCycleToggle == null || sunLightController == null)
@@ -670,7 +697,7 @@ public class UIController : MonoBehaviour
                 extension == ".tiff")
             {
                 string fileName = Path.GetFileName(file);
-                if (fileName.Contains("_height"))
+                if (fileName.Contains("_height") || fileName.Contains("_plates"))
                     continue;
                 availableImages.Add(fileName);
             }
@@ -756,6 +783,31 @@ public class UIController : MonoBehaviour
             else
             {
                 EarthManager.Instance.ClearEarthHeightMap();
+            }
+
+            // Auto-detect and load matching plate overlay
+            string plateOverlayPath = Path.Combine(
+                Path.GetDirectoryName(filePath),
+                baseName + "_plates" + Path.GetExtension(filePath));
+            if (File.Exists(plateOverlayPath))
+            {
+                byte[] plateData = File.ReadAllBytes(plateOverlayPath);
+                Texture2D plateOverlayTex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                if (plateOverlayTex.LoadImage(plateData))
+                {
+                    plateOverlayTex.filterMode = FilterMode.Bilinear;
+                    plateOverlayTex.wrapMode = TextureWrapMode.Repeat;
+                    EarthManager.Instance.SetPlateOverlay(plateOverlayTex);
+                    Debug.Log($"Auto-loaded plate overlay: {plateOverlayPath}");
+                }
+                else
+                {
+                    Destroy(plateOverlayTex);
+                }
+            }
+            else
+            {
+                EarthManager.Instance.SetPlateOverlayVisible(false);
             }
         }
         else

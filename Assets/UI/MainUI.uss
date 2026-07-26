@@ -279,14 +279,14 @@
     -unity-text-align: middle-right;
 }
 
-#autocycle-toggle, #arrow-toggle {
+#autocycle-toggle, #arrow-toggle, #plate-overlay-toggle {
     margin-right: 16px;
     margin-left: 4px;
     flex-shrink: 0;
 }
 
 .unity-toggle__label {
-    color: #E8E8E8;
+    color: white;
     font-size: 12px;
     white-space: nowrap;
 }

@@ -57,6 +57,98 @@ namespace WorldTerrain
             return colors;
         }
 
+        /// <summary>
+        /// Render the tectonic plate division map. Each plate gets a distinct
+        /// color; plate boundaries (earthquake belts) are highlighted in
+        /// light yellow. When transparent=true, plate interiors have low
+        /// alpha so the underlying terrain is visible through the overlay.
+        /// </summary>
+        public static Color[] RenderPlateMap(
+            int width, int height, int[] plateIds, bool transparent)
+        {
+            Color[] colors = new Color[width * height];
+
+            int numPlates = 0;
+            for (int i = 0; i < plateIds.Length; i++)
+            {
+                if (plateIds[i] > numPlates)
+                    numPlates = plateIds[i];
+            }
+            numPlates++;
+
+            Color[] palette = GeneratePlatePalette(numPlates);
+
+            // 8-neighbour offsets (x wraps, y clamps)
+            int[] dx8 = { -1, 0, 1, -1, 1, -1, 0, 1 };
+            int[] dy8 = { -1, -1, -1, 0, 0, 1, 1, 1 };
+
+            float boundaryAlpha = transparent ? 0.9f : 1f;
+            float interiorAlpha = transparent ? 0.03f : 1f;
+            Color boundaryColor = new Color(1f, 0.95f, 0.5f, boundaryAlpha);
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    int idx = y * width + x;
+                    int plate = plateIds[idx];
+
+                    bool isBoundary = false;
+                    for (int d = 0; d < 8; d++)
+                    {
+                        int nx = (x + dx8[d] + width) % width;
+                        int ny = y + dy8[d];
+                        if (ny < 0 || ny >= height)
+                            continue;
+                        if (plateIds[ny * width + nx] != plate)
+                        {
+                            isBoundary = true;
+                            break;
+                        }
+                    }
+
+                    if (isBoundary)
+                    {
+                        colors[idx] = boundaryColor;
+                    }
+                    else
+                    {
+                        Color c = palette[plate];
+                        colors[idx] = new Color(c.r, c.g, c.b, interiorAlpha);
+                    }
+                }
+            }
+
+            return colors;
+        }
+
+        private static Color[] GeneratePlatePalette(int count)
+        {
+            Color[] colors = new Color[count];
+            for (int i = 0; i < count; i++)
+            {
+                float h = (float)i / count;
+                colors[i] = HsvToRgb(h, 0.7f, 0.9f);
+            }
+            return colors;
+        }
+
+        private static Color HsvToRgb(float h, float s, float v)
+        {
+            float c = v * s;
+            float huePos = h * 6f;
+            float x = c * (1f - (float)Math.Abs(huePos % 2f - 1f));
+            float m = v - c;
+            float r, g, b;
+            if (huePos < 1f) { r = c; g = x; b = 0f; }
+            else if (huePos < 2f) { r = x; g = c; b = 0f; }
+            else if (huePos < 3f) { r = 0f; g = c; b = x; }
+            else if (huePos < 4f) { r = 0f; g = x; b = c; }
+            else if (huePos < 5f) { r = x; g = 0f; b = c; }
+            else { r = c; g = 0f; b = x; }
+            return new Color(r + m, g + m, b + m, 1f);
+        }
+
         // ── Private helpers ──
 
         private static double SmoothStep(double t)

@@ -125,5 +125,6 @@ namespace WorldTerrain
         public TerrainType[] terrainTypes;
         public Color[] heightColors;
         public Color[] terrainColors;
+        public Color[] plateOverlayColors;
     }
 }

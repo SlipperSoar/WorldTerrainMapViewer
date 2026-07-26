@@ -15,6 +15,8 @@ public class EarthManager : MonoBehaviour
 
     private List<MarkerData> markers = new List<MarkerData>();
     private int currentColorIndex = 0;
+    private Renderer _plateOverlayRenderer;
+    private GameObject _plateOverlayObject;
 
     public Color[] markerColors = new Color[]
     {
@@ -100,6 +102,25 @@ public class EarthManager : MonoBehaviour
             material.SetTexture("_HeightTex", null);
             material.SetFloat("_HeightScale", 0f);
         }
+    }
+
+    public void SetPlateOverlay(Texture2D plateTexture)
+    {
+        if (_plateOverlayRenderer == null)
+            CreatePlateOverlaySphere();
+
+        if (_plateOverlayRenderer != null)
+        {
+            _plateOverlayRenderer.material.SetTexture("_MainTex", plateTexture);
+            _plateOverlayObject.SetActive(true);
+            Debug.Log("Applied plate overlay texture to overlay sphere");
+        }
+    }
+
+    public void SetPlateOverlayVisible(bool visible)
+    {
+        if (_plateOverlayObject != null)
+            _plateOverlayObject.SetActive(visible);
     }
 
     public Vector3? RaycastToEarthPosition(Vector3 screenPosition)
@@ -252,6 +273,40 @@ public class EarthManager : MonoBehaviour
         DontDestroyOnLoad(markerObj);
 
         Debug.Log("Created default marker prefab");
+    }
+
+    private void CreatePlateOverlaySphere()
+    {
+        if (earthRenderer == null)
+        {
+            Debug.LogError("Cannot create plate overlay: earthRenderer is not assigned!");
+            return;
+        }
+
+        Transform earthTransform = earthRenderer.transform;
+
+        GameObject overlayObj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        overlayObj.name = "PlateOverlay";
+        overlayObj.transform.SetParent(earthTransform, false);
+        overlayObj.transform.localScale = Vector3.one * 0.205f;
+
+        Destroy(overlayObj.GetComponent<Collider>());
+
+        Shader overlayShader = Shader.Find("Custom/PlateOverlayShader");
+        if (overlayShader == null)
+        {
+            Debug.LogError("PlateOverlayShader not found! Falling back to Diffuse.");
+            overlayShader = Shader.Find("Diffuse");
+        }
+
+        Material mat = new Material(overlayShader);
+        Renderer renderer = overlayObj.GetComponent<Renderer>();
+        renderer.material = mat;
+
+        _plateOverlayObject = overlayObj;
+        _plateOverlayRenderer = renderer;
+
+        Debug.Log("Created plate overlay sphere");
     }
 
     #endregion

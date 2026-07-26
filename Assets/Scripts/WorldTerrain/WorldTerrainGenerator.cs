@@ -154,6 +154,23 @@ public class WorldTerrainGenerator : MonoBehaviour
         string terrainPath = Path.Combine(
             Application.streamingAssetsPath,
             $"gen_{seedStr}_{timestamp}.png");
+        string platePath = Path.Combine(
+            Application.streamingAssetsPath,
+            $"gen_{seedStr}_{timestamp}_plates.png");
+
+        // Create plate textures — save the transparent version as PNG so that
+        // reloading from disk preserves the correct alpha for the overlay sphere
+        Texture2D plateTex = new Texture2D(
+            result.width, result.height, TextureFormat.RGBA32, false);
+        plateTex.SetPixels(result.plateOverlayColors);
+        plateTex.Apply();
+
+        Texture2D overlayTex = new Texture2D(
+            result.width, result.height, TextureFormat.RGBA32, false);
+        overlayTex.SetPixels(result.plateOverlayColors);
+        overlayTex.filterMode = FilterMode.Bilinear;
+        overlayTex.wrapMode = TextureWrapMode.Repeat;
+        overlayTex.Apply();
 
         try
         {
@@ -162,6 +179,9 @@ public class WorldTerrainGenerator : MonoBehaviour
 
             File.WriteAllBytes(terrainPath, terrainTex.EncodeToPNG());
             Debug.Log($"Saved terrain map: {terrainPath}");
+
+            File.WriteAllBytes(platePath, plateTex.EncodeToPNG());
+            Debug.Log($"Saved plate division map: {platePath}");
         }
         catch (Exception e)
         {
@@ -175,6 +195,7 @@ public class WorldTerrainGenerator : MonoBehaviour
         {
             EarthManager.Instance.SetEarthSurface(terrainTex);
             EarthManager.Instance.SetEarthHeightMap(heightTex);
+            EarthManager.Instance.SetPlateOverlay(overlayTex);
         }
         else
         {
@@ -223,6 +244,11 @@ public class WorldTerrainGenerator : MonoBehaviour
                 config.width, config.height, heightField,
                 plateIds, hydrology, noise);
 
+            // Step 5b: Render plate division map (transparent for overlay + PNG)
+            generationProgress = 0.75f;
+            var plateOverlayColors = TerrainMapRenderer.RenderPlateMap(
+                config.width, config.height, plateIds, true);
+
             // Step 8: Grayscale heightmap
             generationProgress = 0.82f;
             var heightColors = TerrainMapRenderer.RenderHeightMap(
@@ -242,7 +268,8 @@ public class WorldTerrainGenerator : MonoBehaviour
                 plateIds = plateIds,
                 terrainTypes = terrainTypes,
                 heightColors = heightColors,
-                terrainColors = terrainColors
+                terrainColors = terrainColors,
+                plateOverlayColors = plateOverlayColors
             };
             generationProgress = 1.0f;
         }

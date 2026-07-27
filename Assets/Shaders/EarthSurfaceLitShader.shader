@@ -23,6 +23,7 @@ Shader "Custom/EarthSurfaceLitShader"
             #pragma fragment frag
             #pragma multi_compile_fwdbase
             #pragma multi_compile_fog
+            #pragma multi_compile _ _TERRAIN_DISPLACEMENT_ON
 
             #include "UnityCG.cginc"
             #include "Lighting.cginc"
@@ -81,7 +82,10 @@ Shader "Custom/EarthSurfaceLitShader"
             v2f vert (appdata v)
             {
                 v2f o;
+                o.uv = v.uv;
+                o.localPos = v.vertex.xyz;
 
+#if defined(_TERRAIN_DISPLACEMENT_ON)
                 float2 heightUV = EquirectangularUV(v.vertex.xyz);
 
                 float h = GetDisplacedHeight(heightUV);
@@ -110,10 +114,13 @@ Shader "Custom/EarthSurfaceLitShader"
                 float3 newNormal = normalize(cross(tangentV, tangentU));
 
                 o.vertex = UnityObjectToClipPos(float4(displaced, 1.0));
-                o.uv = v.uv;
-                o.localPos = v.vertex.xyz;
                 o.worldNormal = UnityObjectToWorldNormal(newNormal);
                 o.worldPos = mul(unity_ObjectToWorld, float4(displaced, 1.0)).xyz;
+#else
+                o.vertex = UnityObjectToClipPos(v.vertex);
+                o.worldNormal = UnityObjectToWorldNormal(v.normal);
+                o.worldPos = mul(unity_ObjectToWorld, v.vertex).xyz;
+#endif
                 UNITY_TRANSFER_FOG(o, o.vertex);
                 return o;
             }
@@ -163,6 +170,7 @@ Shader "Custom/EarthSurfaceLitShader"
             #pragma fragment frag
             #pragma multi_compile_fwdadd
             #pragma multi_compile_fog
+            #pragma multi_compile _ _TERRAIN_DISPLACEMENT_ON
 
             #include "UnityCG.cginc"
             #include "Lighting.cginc"
@@ -221,7 +229,10 @@ Shader "Custom/EarthSurfaceLitShader"
             v2f vert (appdata v)
             {
                 v2f o;
+                o.uv = v.uv;
+                o.localPos = v.vertex.xyz;
 
+#if defined(_TERRAIN_DISPLACEMENT_ON)
                 float2 heightUV = EquirectangularUV(v.vertex.xyz);
 
                 float h = GetDisplacedHeight(heightUV);
@@ -250,10 +261,13 @@ Shader "Custom/EarthSurfaceLitShader"
                 float3 newNormal = normalize(cross(tangentV, tangentU));
 
                 o.vertex = UnityObjectToClipPos(float4(displaced, 1.0));
-                o.uv = v.uv;
-                o.localPos = v.vertex.xyz;
                 o.worldNormal = UnityObjectToWorldNormal(newNormal);
                 o.worldPos = mul(unity_ObjectToWorld, float4(displaced, 1.0)).xyz;
+#else
+                o.vertex = UnityObjectToClipPos(v.vertex);
+                o.worldNormal = UnityObjectToWorldNormal(v.normal);
+                o.worldPos = mul(unity_ObjectToWorld, v.vertex).xyz;
+#endif
                 UNITY_TRANSFER_FOG(o, o.vertex);
                 return o;
             }

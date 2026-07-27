@@ -54,6 +54,7 @@ public class UIController : MonoBehaviour
     private VisualElement _currentColorSwatch;
     private Button _clearMarkersButton;
     private Toggle _plateOverlayToggle;
+    private Toggle _terrainDisplacementToggle;
     private int _lastColorIndex = -1;
     // State
     private bool _isUpdatingTimeSlider = false;
@@ -111,6 +112,7 @@ public class UIController : MonoBehaviour
         InitializeSpeedSlider();
         InitializeArrowToggle();
         InitializePlateOverlayToggle();
+        InitializeTerrainDisplacementToggle();
         InitializeColorPalette();
         InitializeWorldGeneration();
         InitializeViewButtons();
@@ -511,6 +513,30 @@ public class UIController : MonoBehaviour
         {
             if (EarthManager.Instance != null)
                 EarthManager.Instance.SetPlateOverlayVisible(evt.newValue);
+        });
+    }
+
+    private void InitializeTerrainDisplacementToggle()
+    {
+        if (_plateOverlayToggle == null || _plateOverlayToggle.parent == null)
+            return;
+
+        _terrainDisplacementToggle = new Toggle("地形凹凸");
+        _terrainDisplacementToggle.name = "terrain-displacement-toggle";
+        _terrainDisplacementToggle.value = true;
+        _terrainDisplacementToggle.style.fontSize = 12;
+        _terrainDisplacementToggle.style.marginRight = 16;
+        _terrainDisplacementToggle.style.marginLeft = 4;
+        _terrainDisplacementToggle.style.flexShrink = 0;
+
+        var parent = _plateOverlayToggle.parent;
+        int plateIndex = parent.IndexOf(_plateOverlayToggle);
+        parent.Insert(plateIndex + 1, _terrainDisplacementToggle);
+
+        _terrainDisplacementToggle.RegisterValueChangedCallback(evt =>
+        {
+            if (EarthManager.Instance != null)
+                EarthManager.Instance.SetTerrainDisplacement(evt.newValue);
         });
     }
 

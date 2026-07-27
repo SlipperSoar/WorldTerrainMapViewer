@@ -123,6 +123,18 @@ public class EarthManager : MonoBehaviour
             _plateOverlayObject.SetActive(visible);
     }
 
+    public void SetTerrainDisplacement(bool enabled)
+    {
+        if (earthRenderer != null)
+        {
+            Material material = earthRenderer.material;
+            if (enabled)
+                material.EnableKeyword("_TERRAIN_DISPLACEMENT_ON");
+            else
+                material.DisableKeyword("_TERRAIN_DISPLACEMENT_ON");
+        }
+    }
+
     public Vector3? RaycastToEarthPosition(Vector3 screenPosition)
     {
         if (earthRenderer == null)

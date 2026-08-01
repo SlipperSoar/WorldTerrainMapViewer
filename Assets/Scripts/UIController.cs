@@ -126,9 +126,14 @@ public class UIController : MonoBehaviour
         if (!_initialized)
             TryInitialize();
 
-        // Reload color palette when EarthManager becomes available
-        if (EarthManager.Instance != null && _colorPalette != null)
-            InitializeColorPalette();
+        // Sync state when EarthManager becomes available
+        if (EarthManager.Instance != null)
+        {
+            if (_colorPalette != null)
+                InitializeColorPalette();
+            if (_terrainDisplacementToggle != null)
+                EarthManager.Instance.SetTerrainDisplacement(_terrainDisplacementToggle.value);
+        }
         if (_mapList != null)
             LoadImagesFromStreamingAssets();
     }

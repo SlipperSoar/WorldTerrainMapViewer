@@ -12,6 +12,9 @@ public class EarthManager : MonoBehaviour
     [SerializeField] private GameObject markerPrefab;
     [SerializeField] private Transform markersParent;
     [SerializeField, Range(0f, 0.3f)] private float heightScale = 0.15f;
+    [SerializeField] private float labelMaxDisplayDistance = 20f;
+    [SerializeField] private float labelBaseCharSize = 0.08f;
+    [SerializeField] private float labelReferenceDistance = 5f;
 
     private List<MarkerData> markers = new List<MarkerData>();
     private int currentColorIndex = 0;
@@ -56,6 +59,7 @@ public class EarthManager : MonoBehaviour
     {
         HandleMarkerInput();
         HandleColorSelection();
+        UpdateMarkerLabels();
     }
 
     #endregion
@@ -167,14 +171,23 @@ public class EarthManager : MonoBehaviour
         GameObject marker = Instantiate(markerPrefab, markersParent);
         marker.transform.position = worldPosition;
 
+        // Align marker up to surface normal so the label sits above the surface
+        if (earthRenderer != null)
+        {
+            Vector3 normal = (worldPosition - earthRenderer.transform.position).normalized;
+            marker.transform.up = normal;
+        }
+
         MarkerData markerData = new MarkerData
         {
             gameObject = marker,
             position = worldPosition,
             colorIndex = colorIndex,
-            timestamp = Time.time
+            timestamp = Time.time,
+            name = ""
         };
 
+        CreateMarkerLabel(marker, markerData, markers.Count);
         markers.Add(markerData);
 
         Renderer markerRenderer = marker.GetComponent<Renderer>();
@@ -194,8 +207,11 @@ public class EarthManager : MonoBehaviour
         {
             if (markers[i].gameObject == marker)
             {
+                if (markers[i].labelMesh != null)
+                    Destroy(markers[i].labelMesh.gameObject);
                 markers.RemoveAt(i);
                 Destroy(marker);
+                UpdateAllMarkerLabels();
                 break;
             }
         }
@@ -205,6 +221,8 @@ public class EarthManager : MonoBehaviour
     {
         foreach (var marker in markers)
         {
+            if (marker.labelMesh != null)
+                Destroy(marker.labelMesh.gameObject);
             Destroy(marker.gameObject);
         }
 
@@ -237,6 +255,27 @@ public class EarthManager : MonoBehaviour
     public int GetMarkerCount()
     {
         return markers.Count;
+    }
+
+    public void SetMarkerName(GameObject marker, string name)
+    {
+        for (int i = 0; i < markers.Count; i++)
+        {
+            if (markers[i].gameObject == marker)
+            {
+                markers[i].name = name ?? "";
+                UpdateMarkerLabelText(markers[i], i);
+                break;
+            }
+        }
+    }
+
+    public void UpdateAllMarkerLabels()
+    {
+        for (int i = 0; i < markers.Count; i++)
+        {
+            UpdateMarkerLabelText(markers[i], i);
+        }
     }
 
     #endregion
@@ -287,6 +326,70 @@ public class EarthManager : MonoBehaviour
         Debug.Log("Created default marker prefab");
     }
 
+    private void CreateMarkerLabel(GameObject marker, MarkerData data, int index)
+    {
+        GameObject labelObj = new GameObject("Label");
+        labelObj.transform.SetParent(markersParent, true);
+
+        TextMesh textMesh = labelObj.AddComponent<TextMesh>();
+        textMesh.text = $"#{index + 1}";
+        textMesh.anchor = TextAnchor.LowerCenter;
+        textMesh.alignment = TextAlignment.Center;
+        textMesh.characterSize = labelBaseCharSize;
+        textMesh.fontSize = 64;
+        textMesh.color = Color.white;
+
+        data.labelMesh = textMesh;
+    }
+
+    private void UpdateMarkerLabelText(MarkerData data, int index)
+    {
+        if (data.labelMesh == null) return;
+        string display = string.IsNullOrEmpty(data.name)
+            ? $"#{index + 1}"
+            : $"#{index + 1} {data.name}";
+        data.labelMesh.text = display;
+    }
+
+    private void UpdateMarkerLabels()
+    {
+        Camera cam = Camera.main;
+        if (cam == null) return;
+
+        Vector3 earthCenter = earthRenderer != null ? earthRenderer.transform.position : Vector3.zero;
+
+        for (int i = 0; i < markers.Count; i++)
+        {
+            var data = markers[i];
+            if (data.labelMesh == null) continue;
+
+            Vector3 markerPos = data.gameObject.transform.position;
+            float distance = Vector3.Distance(cam.transform.position, markerPos);
+
+            if (distance > labelMaxDisplayDistance)
+            {
+                data.labelMesh.gameObject.SetActive(false);
+                continue;
+            }
+
+            data.labelMesh.gameObject.SetActive(true);
+
+            // Position above the marker along surface normal
+            Vector3 normal = (markerPos - earthCenter).normalized;
+            float markerRadius = 0.5f * data.gameObject.transform.lossyScale.x;
+            data.labelMesh.transform.position = markerPos + normal * (markerRadius + 0.02f);
+
+            // Scale character size proportionally to distance for constant screen size
+            float scale = distance / labelReferenceDistance;
+            data.labelMesh.characterSize = labelBaseCharSize * scale;
+
+            // Billboard: face the camera
+            Vector3 dir = data.labelMesh.transform.position - cam.transform.position;
+            if (dir != Vector3.zero)
+                data.labelMesh.transform.rotation = Quaternion.LookRotation(dir);
+        }
+    }
+
     private void CreatePlateOverlaySphere()
     {
         if (earthRenderer == null)
@@ -331,4 +434,6 @@ public class MarkerData
     public Vector3 position;
     public int colorIndex;
     public float timestamp;
+    public string name = "";
+    public TextMesh labelMesh;
 }

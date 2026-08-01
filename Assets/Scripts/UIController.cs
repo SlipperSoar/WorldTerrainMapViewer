@@ -409,6 +409,9 @@ public class UIController : MonoBehaviour
             _markerList.Add(item);
             _markerItems.Add(item);
         }
+
+        if (EarthManager.Instance != null)
+            EarthManager.Instance.UpdateAllMarkerLabels();
     }
 
     private VisualElement CreateMarkerItem(MarkerData markerData, int index)
@@ -423,15 +426,29 @@ public class UIController : MonoBehaviour
             dot.style.backgroundColor = EarthManager.Instance.markerColors[markerData.colorIndex];
         container.Add(dot);
 
-        // Label
-        var label = new Label($"#{index + 1}  {markerData.position.ToString("F2")}");
-        container.Add(label);
+        // Index label (non-editable)
+        var indexLabel = new Label($"#{index + 1}");
+        indexLabel.AddToClassList("marker-index-label");
+        container.Add(indexLabel);
+
+        // Editable name field
+        var nameField = new TextField();
+        nameField.AddToClassList("marker-name-field");
+        nameField.value = markerData.name;
+        GameObject markerObj = markerData.gameObject;
+        nameField.RegisterCallback<FocusOutEvent>(evt =>
+        {
+            string name = nameField.value.Trim();
+            if (EarthManager.Instance != null)
+                EarthManager.Instance.SetMarkerName(markerObj, name);
+            nameField.SetValueWithoutNotify(name);
+        });
+        container.Add(nameField);
 
         // Delete button
         var deleteBtn = new Button();
         deleteBtn.AddToClassList("marker-delete-btn");
         deleteBtn.text = "删除";
-        GameObject markerObj = markerData.gameObject;
         deleteBtn.clicked += () =>
         {
             if (EarthManager.Instance != null)

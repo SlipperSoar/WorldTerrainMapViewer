@@ -928,6 +928,9 @@ MonoBehaviour:
   markerPrefab: {fileID: 36577926958917543, guid: e5e8efd0636f8594eac5f7a00f3245cb, type: 3}
   markersParent: {fileID: 767843750}
   heightScale: 0.3
+  labelMaxDisplayDistance: 12
+  labelBaseCharSize: 0.04
+  labelReferenceDistance: 5
   markerColors:
   - {r: 1, g: 0, b: 0, a: 1}
   - {r: 0, g: 0, b: 1, a: 1}

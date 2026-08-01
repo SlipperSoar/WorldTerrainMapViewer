@@ -1055,6 +1055,7 @@ MonoBehaviour:
   labelMaxDisplayDistance: 12
   labelBaseCharSize: 0.04
   labelReferenceDistance: 5
+  lineWidth: 0.012
   markerColors:
   - {r: 1, g: 0, b: 0, a: 1}
   - {r: 0, g: 0, b: 1, a: 1}
@@ -1075,7 +1076,7 @@ Transform:
   m_GameObject: {fileID: 2077428199}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 1016.8237, y: 723.3658, z: 3.034773}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []

@@ -53,6 +53,10 @@ public class UIController : MonoBehaviour
     private Label _currentColorLabel;
     private VisualElement _currentColorSwatch;
     private Button _clearMarkersButton;
+    private Button _drawModeButton;
+    private Button _undoLineButton;
+    private Button _clearLinesButton;
+    private Button _saveLinesButton;
     private Toggle _plateOverlayToggle;
     private Toggle _terrainDisplacementToggle;
     private int _lastColorIndex = -1;
@@ -114,6 +118,7 @@ public class UIController : MonoBehaviour
         InitializePlateOverlayToggle();
         InitializeTerrainDisplacementToggle();
         InitializeColorPalette();
+        InitializeDrawModeButtons();
         InitializeWorldGeneration();
         InitializeViewButtons();
         InitializeExitButton();
@@ -153,6 +158,8 @@ public class UIController : MonoBehaviour
         UpdateMarkerListDisplay();
         UpdateCurrentColorDisplay();
         UpdateHoverPanel();
+        HandleDrawModeShortcuts();
+        UpdateDrawModeButtonLabel();
     }
 
     private void OnDestroy()
@@ -745,7 +752,7 @@ public class UIController : MonoBehaviour
                 extension == ".tiff")
             {
                 string fileName = Path.GetFileName(file);
-                if (fileName.Contains("_height") || fileName.Contains("_plates"))
+                if (fileName.Contains("_height") || fileName.Contains("_plates") || fileName.Contains("_lines"))
                     continue;
                 availableImages.Add(fileName);
             }
@@ -857,6 +864,9 @@ public class UIController : MonoBehaviour
             {
                 EarthManager.Instance.SetPlateOverlayVisible(false);
             }
+
+            // Auto-load matching line data
+            EarthManager.Instance.LoadLinesFromJSON(baseName);
         }
         else
         {
@@ -864,6 +874,82 @@ public class UIController : MonoBehaviour
             Destroy(newTexture);
         }
         yield return null;
+    }
+
+    #endregion
+
+    #region Draw Mode
+
+    private void InitializeDrawModeButtons()
+    {
+        var bottomBar = _root.Q<VisualElement>("bottom-bar");
+        if (bottomBar == null) return;
+
+        _drawModeButton = new Button();
+        _drawModeButton.AddToClassList("draw-button");
+        _drawModeButton.text = "画线模式";
+        _drawModeButton.clicked += () =>
+        {
+            if (EarthManager.Instance != null)
+                EarthManager.Instance.SetDrawMode(!EarthManager.Instance.IsDrawMode);
+            UpdateDrawModeButtonLabel();
+        };
+        bottomBar.Add(_drawModeButton);
+
+        _undoLineButton = new Button();
+        _undoLineButton.AddToClassList("draw-button");
+        _undoLineButton.text = "撤销线";
+        _undoLineButton.clicked += () =>
+        {
+            if (EarthManager.Instance != null)
+                EarthManager.Instance.UndoLastLine();
+        };
+        bottomBar.Add(_undoLineButton);
+
+        _clearLinesButton = new Button();
+        _clearLinesButton.AddToClassList("draw-button");
+        _clearLinesButton.text = "清除线";
+        _clearLinesButton.clicked += () =>
+        {
+            if (EarthManager.Instance != null)
+                EarthManager.Instance.ClearAllLines();
+        };
+        bottomBar.Add(_clearLinesButton);
+
+        _saveLinesButton = new Button();
+        _saveLinesButton.AddToClassList("draw-button");
+        _saveLinesButton.text = "保存线";
+        _saveLinesButton.clicked += () =>
+        {
+            if (EarthManager.Instance != null)
+                EarthManager.Instance.SaveLinesAsPNG();
+        };
+        bottomBar.Add(_saveLinesButton);
+
+        UpdateDrawModeButtonLabel();
+    }
+
+    private void UpdateDrawModeButtonLabel()
+    {
+        if (_drawModeButton == null) return;
+        bool isDraw = EarthManager.Instance != null && EarthManager.Instance.IsDrawMode;
+        _drawModeButton.text = isDraw ? "画线模式 ●" : "画线模式";
+    }
+
+    private void HandleDrawModeShortcuts()
+    {
+        if (Input.GetKeyDown(KeyCode.L))
+        {
+            if (EarthManager.Instance != null)
+                EarthManager.Instance.SetDrawMode(!EarthManager.Instance.IsDrawMode);
+            UpdateDrawModeButtonLabel();
+        }
+
+        if (Input.GetKeyDown(KeyCode.Z))
+        {
+            if (EarthManager.Instance != null)
+                EarthManager.Instance.UndoLastLine();
+        }
     }
 
     #endregion

@@ -487,6 +487,24 @@
     color: #E8E8E8;
 }
 
+.draw-button {
+    background-color: rgba(30, 35, 50, 0.9);
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    color: #888;
+    font-size: 12px;
+    padding: 4px 10px;
+    flex-shrink: 0;
+    white-space: nowrap;
+    margin-left: 4px;
+}
+
+.draw-button:hover {
+    background-color: rgba(78, 205, 196, 0.15);
+    color: #E8E8E8;
+}
+
 /* ── Hover Zone ── */
 #hover-zone {
     position: absolute;

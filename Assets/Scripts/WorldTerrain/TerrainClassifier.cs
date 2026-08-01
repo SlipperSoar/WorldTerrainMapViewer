@@ -38,28 +38,6 @@ namespace WorldTerrain
                     int idx = y * w + x;
                     float elev = heightField[idx];
 
-                    // ── Step 6: Glacier rules ──
-
-                    // Permanent ice above 73° latitude
-                    if (absLat > 73.0)
-                    {
-                        types[idx] = TerrainType.Glacier;
-                        continue;
-                    }
-
-                    // Transition zone 68°–73°: noise-based glacier boundary
-                    if (absLat > 68.0)
-                    {
-                        double transition = (absLat - 68.0) / 5.0;
-                        Vector3D pos = PlateTectonicsGenerator.PixelToSphere(x, y, w, h);
-                        double n = noise.Noise3D(pos.x * 5.0, pos.y * 5.0, pos.z * 5.0);
-                        if (n < transition)
-                        {
-                            types[idx] = TerrainType.Glacier;
-                            continue;
-                        }
-                    }
-
                     // ── Rivers and lakes ──
                     if (hydrology.riverMask[idx])
                     {
@@ -84,6 +62,27 @@ namespace WorldTerrain
                         continue;
                     }
 
+                    // ── Polar ice caps (land only) ──
+                    // Permanent ice on land above 73° latitude
+                    if (absLat > 73.0)
+                    {
+                        types[idx] = TerrainType.Glacier;
+                        continue;
+                    }
+
+                    // Transition zone 68°–73°: noise-based glacier boundary on land
+                    if (absLat > 68.0)
+                    {
+                        double transition = (absLat - 68.0) / 5.0;
+                        Vector3D pos = PlateTectonicsGenerator.PixelToSphere(x, y, w, h);
+                        double n = noise.Noise3D(pos.x * 5.0, pos.y * 5.0, pos.z * 5.0);
+                        if (n < transition)
+                        {
+                            types[idx] = TerrainType.Glacier;
+                            continue;
+                        }
+                    }
+
                     // ── Step 5: Land classification ──
                     Vector3D p = PlateTectonicsGenerator.PixelToSphere(x, y, w, h);
                     double moisture = ComputeMoisture(absLat, seaDist[idx], noise, p);
@@ -91,9 +90,6 @@ namespace WorldTerrain
                     types[idx] = ClassifyLand(elev, absLat, moisture, seaDist[idx]);
                 }
             }
-
-            // Ensure pole rows are uniform
-            EnsurePoleUniformity(w, h, types);
 
             return types;
         }
@@ -252,23 +248,6 @@ namespace WorldTerrain
 
             // Coast / lowland
             return TerrainType.Coast;
-        }
-
-        /// <summary>
-        /// Ensure pole rows are uniform (same terrain type across all x).
-        /// </summary>
-        private static void EnsurePoleUniformity(int w, int h, TerrainType[] types)
-        {
-            // North pole (y = 0)
-            var northType = types[0];
-            for (int x = 0; x < w; x++)
-                types[x] = northType;
-
-            // South pole (y = h-1)
-            int lastRow = (h - 1) * w;
-            var southType = types[lastRow];
-            for (int x = 0; x < w; x++)
-                types[lastRow + x] = southType;
         }
     }
 }

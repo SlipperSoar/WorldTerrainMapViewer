@@ -174,8 +174,7 @@ namespace WorldTerrain
             new LandStop { elev = 1500, r = 0.78, g = 0.58, b = 0.25 },  // Orange-tan
             new LandStop { elev = 2500, r = 0.72, g = 0.48, b = 0.20 },  // Brown
             new LandStop { elev = 4000, r = 0.58, g = 0.35, b = 0.15 },  // Dark brown
-            new LandStop { elev = 6000, r = 0.45, g = 0.28, b = 0.12 },  // Very dark brown
-            new LandStop { elev = 8000, r = 0.80, g = 0.80, b = 0.82 },  // Snow
+            new LandStop { elev = 5000, r = 0.80, g = 0.80, b = 0.82 },  // Snow
             new LandStop { elev =10000, r = 0.95, g = 0.95, b = 0.96 },  // Pure snow
         };
 

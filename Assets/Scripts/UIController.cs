@@ -159,7 +159,6 @@ public class UIController : MonoBehaviour
         UpdateCurrentColorDisplay();
         UpdateHoverPanel();
         HandleDrawModeShortcuts();
-        UpdateDrawModeButtonLabel();
     }
 
     private void OnDestroy()
@@ -892,7 +891,7 @@ public class UIController : MonoBehaviour
         {
             if (EarthManager.Instance != null)
                 EarthManager.Instance.SetDrawMode(!EarthManager.Instance.IsDrawMode);
-            UpdateDrawModeButtonLabel();
+            SyncDrawModeState();
         };
         bottomBar.Add(_drawModeButton);
 
@@ -936,13 +935,21 @@ public class UIController : MonoBehaviour
         _drawModeButton.text = isDraw ? "画线模式 ●" : "画线模式";
     }
 
+    private void SyncDrawModeState()
+    {
+        bool isDraw = EarthManager.Instance != null && EarthManager.Instance.IsDrawMode;
+        _drawModeButton.text = isDraw ? "画线模式 ●" : "画线模式";
+        if (_terrainDisplacementToggle != null)
+            _terrainDisplacementToggle.SetValueWithoutNotify(!isDraw);
+    }
+
     private void HandleDrawModeShortcuts()
     {
         if (Input.GetKeyDown(KeyCode.L))
         {
             if (EarthManager.Instance != null)
                 EarthManager.Instance.SetDrawMode(!EarthManager.Instance.IsDrawMode);
-            UpdateDrawModeButtonLabel();
+            SyncDrawModeState();
         }
 
         if (Input.GetKeyDown(KeyCode.Z))

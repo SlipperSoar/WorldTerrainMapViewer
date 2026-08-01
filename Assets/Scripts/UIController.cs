@@ -253,10 +253,19 @@ public class UIController : MonoBehaviour
         if (_slidePanel == null || _root == null)
             return;
 
+        // ScaleWithScreenSize: UIToolkit layout is at reference resolution (1920x1080),
+        // Input.mousePosition is in physical screen pixels. Convert mouse to UI space.
+        float panelH = _root.panel.visualTree.layout.height;
+        float scale = panelH > 0 ? (float)Screen.height / panelH : 1f;
         Vector2 mousePos = Input.mousePosition;
-        float triggerWidth = Screen.width * 0.02f;
-        bool mouseInTrigger = mousePos.x >= 0 && mousePos.x <= triggerWidth;
-        bool mouseOverPanel = _isPanelVisible && MouseOverSlidePanel(mousePos);
+        // Convert from screen bottom-left to UI top-left coordinate space
+        Vector2 uiMousePos = new Vector2(mousePos.x / scale, (Screen.height - mousePos.y) / scale);
+
+        float panelWidth = _slidePanel.resolvedStyle.width > 0
+            ? _slidePanel.resolvedStyle.width
+            : 340f;
+        bool mouseInTrigger = uiMousePos.x >= 0 && uiMousePos.x <= panelWidth;
+        bool mouseOverPanel = _isPanelVisible && MouseOverSlidePanel(uiMousePos);
 
         bool shouldShow = mouseInTrigger || mouseOverPanel;
 
@@ -271,19 +280,13 @@ public class UIController : MonoBehaviour
         }
     }
 
-    private bool MouseOverSlidePanel(Vector2 mousePos)
+    private bool MouseOverSlidePanel(Vector2 uiMousePos)
     {
         if (_slidePanel == null) return false;
 
-        // UIToolkit uses top-left origin; Input.mousePosition uses bottom-left
-        float screenH = Screen.height;
-        Vector2 uiPos = new Vector2(mousePos.x, screenH - mousePos.y);
-
-        var layout = _slidePanel.layout;
-        // When visible, the panel is at left=0, so layout.x ≈ 0
-        // Check if mouse is within the panel bounds
-        return uiPos.x >= layout.x && uiPos.x <= layout.x + layout.width &&
-               uiPos.y >= layout.y && uiPos.y <= layout.y + layout.height;
+        var bound = _slidePanel.worldBound;
+        return uiMousePos.x >= bound.xMin && uiMousePos.x <= bound.xMax &&
+               uiMousePos.y >= bound.yMin && uiMousePos.y <= bound.yMax;
     }
 
     #endregion

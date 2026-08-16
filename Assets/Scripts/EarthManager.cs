@@ -31,6 +31,7 @@ public class EarthManager : MonoBehaviour
     private Transform _linesParent;
     [SerializeField] private float lineWidth = 0.012f;
     private string _currentMapName;
+    private bool _isLoadingMarkers = false;
 
     public Color[] markerColors = new Color[]
     {
@@ -209,6 +210,8 @@ public class EarthManager : MonoBehaviour
 
         Debug.Log($"Added marker at {worldPosition}, color index: {colorIndex}");
 
+        SaveMarkersAsJSON();
+
         return marker;
     }
 
@@ -223,6 +226,7 @@ public class EarthManager : MonoBehaviour
                 markers.RemoveAt(i);
                 Destroy(marker);
                 UpdateAllMarkerLabels();
+                SaveMarkersAsJSON();
                 break;
             }
         }
@@ -238,6 +242,8 @@ public class EarthManager : MonoBehaviour
         }
 
         markers.Clear();
+
+        SaveMarkersAsJSON();
 
         Debug.Log("Cleared all markers");
     }
@@ -276,6 +282,7 @@ public class EarthManager : MonoBehaviour
             {
                 markers[i].name = name ?? "";
                 UpdateMarkerLabelText(markers[i], i);
+                SaveMarkersAsJSON();
                 break;
             }
         }
@@ -475,6 +482,87 @@ public class EarthManager : MonoBehaviour
         foreach (var obj in _lineObjects)
             Destroy(obj);
         _lineObjects.Clear();
+    }
+
+    private void SaveMarkersAsJSON()
+    {
+        if (_isLoadingMarkers) return;
+        if (string.IsNullOrEmpty(_currentMapName)) return;
+
+        string path = System.IO.Path.Combine(
+            Application.streamingAssetsPath, $"{_currentMapName}_markers.json");
+
+        if (earthRenderer == null || markers.Count == 0)
+        {
+            if (System.IO.File.Exists(path))
+                System.IO.File.Delete(path);
+            return;
+        }
+
+        Vector3 earthCenter = earthRenderer.transform.position;
+        var data = new MarkerDataList();
+
+        foreach (var marker in markers)
+        {
+            Vector2 uv = WorldToUV(marker.position, earthCenter);
+            data.markers.Add(new MarkerEntry
+            {
+                colorIndex = marker.colorIndex,
+                name = marker.name,
+                u = uv.x,
+                v = uv.y
+            });
+        }
+
+        string json = JsonUtility.ToJson(data, true);
+        System.IO.File.WriteAllText(path, json);
+        Debug.Log($"Saved markers JSON: {path} ({data.markers.Count} markers)");
+    }
+
+    public void LoadMarkersFromJSON(string mapName)
+    {
+        _currentMapName = mapName;
+        ClearAllMarkersWithoutSave();
+
+        string path = System.IO.Path.Combine(
+            Application.streamingAssetsPath, $"{mapName}_markers.json");
+        if (!System.IO.File.Exists(path)) return;
+
+        if (earthRenderer == null) return;
+        Vector3 earthCenter = earthRenderer.transform.position;
+        float earthRadius = earthRenderer.bounds.extents.x;
+
+        _isLoadingMarkers = true;
+
+        string json = System.IO.File.ReadAllText(path);
+        var data = JsonUtility.FromJson<MarkerDataList>(json);
+        if (data != null && data.markers != null)
+        {
+            foreach (var entry in data.markers)
+            {
+                Vector3 worldPos = UVToWorld(entry.u, entry.v, earthCenter, earthRadius);
+                GameObject markerObj = AddMarkerAtPosition(worldPos, entry.colorIndex);
+                if (!string.IsNullOrEmpty(entry.name))
+                    SetMarkerName(markerObj, entry.name);
+            }
+        }
+
+        _isLoadingMarkers = false;
+        UpdateAllMarkerLabels();
+
+        int count = data != null && data.markers != null ? data.markers.Count : 0;
+        Debug.Log($"Loaded {count} markers from {path}");
+    }
+
+    private void ClearAllMarkersWithoutSave()
+    {
+        foreach (var marker in markers)
+        {
+            if (marker.labelMesh != null)
+                Destroy(marker.labelMesh.gameObject);
+            Destroy(marker.gameObject);
+        }
+        markers.Clear();
     }
 
     private int GetColorIndex(Color color)
@@ -802,4 +890,19 @@ public class Vector2Serialized
 public class LineDataList
 {
     public System.Collections.Generic.List<LineEntry> lines = new System.Collections.Generic.List<LineEntry>();
+}
+
+[System.Serializable]
+public class MarkerEntry
+{
+    public int colorIndex;
+    public string name;
+    public float u;
+    public float v;
+}
+
+[System.Serializable]
+public class MarkerDataList
+{
+    public System.Collections.Generic.List<MarkerEntry> markers = new System.Collections.Generic.List<MarkerEntry>();
 }

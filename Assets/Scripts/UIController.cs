@@ -869,6 +869,9 @@ public class UIController : MonoBehaviour
 
             // Auto-load matching line data
             EarthManager.Instance.LoadLinesFromJSON(baseName);
+
+            // Auto-load matching marker data
+            EarthManager.Instance.LoadMarkersFromJSON(baseName);
         }
         else
         {

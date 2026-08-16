@@ -579,9 +579,9 @@ public class EarthManager : MonoBehaviour
     {
         float lon = (u - 0.5f) * 2f * Mathf.PI;
         float lat = (0.5f - v) * Mathf.PI;
-        float x = Mathf.Cos(lat) * Mathf.Cos(lon);
+        float x = Mathf.Cos(lat) * Mathf.Sin(lon);
         float y = Mathf.Sin(lat);
-        float z = Mathf.Cos(lat) * Mathf.Sin(lon);
+        float z = Mathf.Cos(lat) * Mathf.Cos(lon);
         // TransformDirection applies rotation only (no scale), then use world-space radius
         Vector3 worldDir = earthRenderer.transform.TransformDirection(new Vector3(x, y, z)).normalized;
         return earthCenter + worldDir * earthRadius;
@@ -593,10 +593,41 @@ public class EarthManager : MonoBehaviour
         Vector2 uv1 = WorldToUV(p1, earthCenter);
         Vector2 uv2 = WorldToUV(p2, earthCenter);
 
-        int x1 = Mathf.RoundToInt(uv1.x * width);
-        int y1 = Mathf.RoundToInt(uv1.y * height);
-        int x2 = Mathf.RoundToInt(uv2.x * width);
-        int y2 = Mathf.RoundToInt(uv2.y * height);
+        // Detect U-axis seam crossing (line wraps around left/right boundary)
+        float du = uv2.x - uv1.x;
+        if (Mathf.Abs(du) > 0.5f)
+        {
+            // Line crosses the u=0/1 seam — split into two segments at the boundary
+            if (du > 0.5f)
+            {
+                // uv1 near right edge (u→1), uv2 near left edge (u→0)
+                float t = (1f - uv1.x) / (uv2.x + 1f - uv1.x);
+                float vCross = uv1.y + t * (uv2.y - uv1.y);
+                DrawBresenhamLine(tex, uv1.x, uv1.y, 1f, vCross, color, width, height);
+                DrawBresenhamLine(tex, 0f, vCross, uv2.x, uv2.y, color, width, height);
+            }
+            else
+            {
+                // uv1 near left edge (u→0), uv2 near right edge (u→1)
+                float t = (0f - uv1.x) / (uv2.x - 1f - uv1.x);
+                float vCross = uv1.y + t * (uv2.y - uv1.y);
+                DrawBresenhamLine(tex, uv1.x, uv1.y, 0f, vCross, color, width, height);
+                DrawBresenhamLine(tex, 1f, vCross, uv2.x, uv2.y, color, width, height);
+            }
+        }
+        else
+        {
+            DrawBresenhamLine(tex, uv1.x, uv1.y, uv2.x, uv2.y, color, width, height);
+        }
+    }
+
+    private void DrawBresenhamLine(Texture2D tex, float u1, float v1, float u2, float v2,
+        Color color, int width, int height)
+    {
+        int x1 = Mathf.Clamp(Mathf.RoundToInt(u1 * width), 0, width - 1);
+        int y1 = Mathf.Clamp(Mathf.RoundToInt(v1 * height), 0, height - 1);
+        int x2 = Mathf.Clamp(Mathf.RoundToInt(u2 * width), 0, width - 1);
+        int y2 = Mathf.Clamp(Mathf.RoundToInt(v2 * height), 0, height - 1);
 
         // Bresenham line algorithm
         int dx = Mathf.Abs(x2 - x1);
@@ -640,7 +671,7 @@ public class EarthManager : MonoBehaviour
         // Convert to earth's local direction so rotation/tilt doesn't affect UV
         Vector3 worldDir = (worldPos - earthCenter).normalized;
         Vector3 dir = earthRenderer.transform.InverseTransformDirection(worldDir).normalized;
-        float u = 0.5f + Mathf.Atan2(dir.z, dir.x) / (2f * Mathf.PI);
+        float u = 0.5f + Mathf.Atan2(dir.x, dir.z) / (2f * Mathf.PI);
         float v = 0.5f - Mathf.Asin(dir.y) / Mathf.PI;
         return new Vector2(u, v);
     }

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 using UnityEngine.UIElements;
+using WorldTerrain;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -61,6 +62,7 @@ public class UIController : MonoBehaviour
     private Button _saveLinesButton;
     private Toggle _plateOverlayToggle;
     private Toggle _terrainDisplacementToggle;
+    private Toggle _humanOverlayToggle;
     private int _lastColorIndex = -1;
     // State
     private bool _isUpdatingTimeSlider = false;
@@ -120,6 +122,7 @@ public class UIController : MonoBehaviour
         InitializeArrowToggle();
         InitializePlateOverlayToggle();
         InitializeTerrainDisplacementToggle();
+        InitializeHumanOverlayToggle();
         InitializeColorPalette();
         InitializeDrawModeButtons();
         InitializeWorldGeneration();
@@ -576,8 +579,32 @@ public class UIController : MonoBehaviour
         });
     }
 
-    private void UpdateAutoCycleToggleDisplay()
+    /// <summary>人文图层开关（势力范围 / 交通线 / 聚落与地名）</summary>
+    private void InitializeHumanOverlayToggle()
     {
+        if (_terrainDisplacementToggle == null || _terrainDisplacementToggle.parent == null)
+            return;
+
+        _humanOverlayToggle = new Toggle("人文");
+        _humanOverlayToggle.name = "human-overlay-toggle";
+        _humanOverlayToggle.value = true;
+        _humanOverlayToggle.style.fontSize = 12;
+        _humanOverlayToggle.style.marginRight = 16;
+        _humanOverlayToggle.style.marginLeft = 4;
+        _humanOverlayToggle.style.flexShrink = 0;
+
+        var parent = _terrainDisplacementToggle.parent;
+        int index = parent.IndexOf(_terrainDisplacementToggle);
+        parent.Insert(index + 1, _humanOverlayToggle);
+
+        _humanOverlayToggle.RegisterValueChangedCallback(evt =>
+        {
+            if (EarthManager.Instance != null)
+                EarthManager.Instance.SetHumanOverlayVisible(evt.newValue);
+        });
+    }
+
+    private void UpdateAutoCycleToggleDisplay()    {
         if (_autoCycleToggle == null || sunLightController == null)
             return;
 
@@ -875,6 +902,10 @@ public class UIController : MonoBehaviour
             // 载入该地图自身的地图属性（地轴倾角等）
             ApplyMapProperties(baseName);
 
+            // 载入该地图的人文图层（聚落 / 国家 / 交通线），叠加显示在地球上
+            if (Application.isPlaying && EarthManager.Instance != null)
+                EarthManager.Instance.SetHumanGeography(HumanGeographyData.Load(baseName), baseName);
+
             // Auto-load matching line data
             EarthManager.Instance.LoadLinesFromJSON(baseName);
 
@@ -1078,7 +1109,13 @@ public class UIController : MonoBehaviour
     private void OnGenerationComplete(string path)
     {
         if (_genProgress != null)
-            _genProgress.text = "生成完成";
+        {
+            int settlements = EarthManager.Instance != null ? EarthManager.Instance.HumanSettlementCount : 0;
+            int nations = EarthManager.Instance != null ? EarthManager.Instance.HumanNationCount : 0;
+            _genProgress.text = settlements > 0
+                ? $"生成完成（{settlements} 聚落 / {nations} 国）"
+                : "生成完成";
+        }
         Debug.Log($"World generation complete: {path}");
 
         // 生成使用的地轴倾角已经写入地图元数据，这里确保视觉状态一致

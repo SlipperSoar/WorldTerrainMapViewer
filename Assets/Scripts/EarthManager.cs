@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using WorldTerrain;
 
 public class EarthManager : MonoBehaviour
 {
@@ -72,6 +73,7 @@ public class EarthManager : MonoBehaviour
         HandleMarkerInput();
         HandleColorSelection();
         UpdateMarkerLabels();
+        UpdateHumanLabels();
     }
 
     #endregion
@@ -887,6 +889,420 @@ public class EarthManager : MonoBehaviour
         _plateOverlayRenderer = renderer;
 
         Debug.Log("Created plate overlay sphere");
+    }
+
+    #endregion
+
+    #region 人文图层（势力范围 / 交通线 / 聚落 / 地名）
+
+    private HumanGeographyData _humanData;
+    private string _humanMapName;
+    private GameObject _humanOverlayObject;
+    private Renderer _humanOverlayRenderer;
+    private Texture2D _humanOverlayTexture;
+    private Transform _humanLabelsParent;
+    private bool _humanOverlayVisible = true;
+    private readonly List<GameObject> _humanLabelObjects = new List<GameObject>();
+    private readonly List<TextMesh> _humanLabelMeshes = new List<TextMesh>();
+    private readonly List<float> _humanLabelSizes = new List<float>();
+    private readonly List<Color> _humanLabelColors = new List<Color>();
+
+    /// <summary>当前是否已加载人文图层</summary>
+    public bool HasHumanGeography => _humanData != null && _humanData.HasContent;
+
+    /// <summary>当前人文图层对应的地图名</summary>
+    public string HumanMapName => _humanMapName;
+
+    /// <summary>当前人文图层的聚落数量</summary>
+    public int HumanSettlementCount => _humanData != null && _humanData.settlements != null
+        ? _humanData.settlements.Count : 0;
+
+    /// <summary>当前人文图层的国家数量</summary>
+    public int HumanNationCount => _humanData != null && _humanData.nations != null
+        ? _humanData.nations.Count : 0;
+
+    /// <summary>
+    /// 设置（或清除）人文图层：势力范围染色 + 交通线 + 聚落点叠在地球表面，
+    /// 镇以上的聚落再附带中文地名标签。
+    /// </summary>
+    public void SetHumanGeography(HumanGeographyData data, string mapBaseName)
+    {
+        ClearHumanGeography();
+
+        _humanData = data;
+        _humanMapName = mapBaseName;
+
+        if (data == null || !data.HasContent)
+        {
+            Debug.Log($"地图 {mapBaseName} 没有人文数据");
+            return;
+        }
+
+        BuildHumanOverlayTexture(data);
+        CreateHumanOverlaySphere();
+        BuildHumanLabels(data);
+        SetHumanOverlayVisible(_humanOverlayVisible);
+
+        Debug.Log($"人文图层：{data.settlements.Count} 聚落 / {data.nations.Count} 国 / " +
+                  $"{data.routes.Count} 条交通线 / {data.features.Count} 处自然地名");
+    }
+
+    /// <summary>显示或隐藏整个人文图层</summary>
+    public void SetHumanOverlayVisible(bool visible)
+    {
+        _humanOverlayVisible = visible;
+
+        if (_humanOverlayObject != null)
+            _humanOverlayObject.SetActive(visible && HasHumanGeography);
+
+        for (int i = 0; i < _humanLabelObjects.Count; i++)
+            if (_humanLabelObjects[i] != null)
+                _humanLabelObjects[i].SetActive(visible && HasHumanGeography);
+    }
+
+    public bool IsHumanOverlayVisible => _humanOverlayVisible;
+
+    private void ClearHumanGeography()
+    {
+        for (int i = 0; i < _humanLabelObjects.Count; i++)
+            if (_humanLabelObjects[i] != null)
+                Destroy(_humanLabelObjects[i]);
+
+        _humanLabelObjects.Clear();
+        _humanLabelMeshes.Clear();
+        _humanLabelSizes.Clear();
+        _humanLabelColors.Clear();
+
+        if (_humanOverlayObject != null)
+        {
+            Destroy(_humanOverlayObject);
+            _humanOverlayObject = null;
+            _humanOverlayRenderer = null;
+        }
+
+        if (_humanOverlayTexture != null)
+        {
+            Destroy(_humanOverlayTexture);
+            _humanOverlayTexture = null;
+        }
+
+        _humanData = null;
+    }
+
+    /// <summary>把势力范围、交通线与聚落点画进一张半透明贴图。</summary>
+    private void BuildHumanOverlayTexture(HumanGeographyData data)
+    {
+        int tw = Mathf.Max(2, data.territoryWidth);
+        int th = Mathf.Max(2, data.territoryHeight);
+        int scale = Mathf.Clamp(1024 / tw, 2, 8);
+        int texW = tw * scale;
+        int texH = th * scale;
+
+        var pixels = new Color32[texW * texH];
+        var clear = new Color32(0, 0, 0, 0);
+        for (int i = 0; i < pixels.Length; i++)
+            pixels[i] = clear;
+
+        // 1) 势力范围（按国家染色，国界更亮）
+        byte[] territory = data.GetTerritory();
+        if (territory != null && territory.Length >= tw * th)
+        {
+            for (int cy = 0; cy < th; cy++)
+            {
+                for (int cx = 0; cx < tw; cx++)
+                {
+                    int nation = territory[cy * tw + cx];
+                    if (nation == 0)
+                        continue;
+
+                    bool border = IsTerritoryBorder(territory, tw, th, cx, cy, (byte)nation);
+                    Color32 c = NationTint(data, nation - 1, border ? (byte)140 : (byte)62);
+                    FillBlock(pixels, texW, texH, cx * scale, cy * scale, scale, c);
+                }
+            }
+        }
+
+        // 2) 交通线
+        for (int r = 0; r < data.routes.Count; r++)
+        {
+            var route = data.routes[r];
+            if (route.points == null || route.points.Count < 2)
+                continue;
+
+            Color32 c = route.kind == 2 ? new Color32(120, 210, 235, 200)
+                      : route.kind == 1 ? new Color32(110, 175, 235, 210)
+                      : new Color32(225, 190, 130, 190);
+            for (int p = 0; p < route.points.Count - 1; p++)
+                DrawLineUV(pixels, texW, texH, route.points[p], route.points[p + 1], c, 2);
+        }
+
+        // 3) 聚落点（大小表示等级，颜色取所属国家）
+        for (int s = 0; s < data.settlements.Count; s++)
+        {
+            var st = data.settlements[s];
+            int radius = st.level >= 4 ? 8 : st.level == 3 ? 6 : st.level == 2 ? 4 : 3;
+            Color32 fill = NationTint(data, st.nationIndex, 235);
+            FillCircleUV(pixels, texW, texH, st.u, st.v, radius, fill);
+            if (st.level >= 4)
+                FillCircleUV(pixels, texW, texH, st.u, st.v, Mathf.Max(1, radius / 2),
+                    new Color32(255, 245, 210, 255));
+            else if (st.isCapital)
+                FillCircleUV(pixels, texW, texH, st.u, st.v, 1, new Color32(255, 255, 255, 255));
+        }
+
+        var tex = new Texture2D(texW, texH, TextureFormat.RGBA32, false);
+        tex.SetPixels32(pixels);
+        tex.filterMode = FilterMode.Bilinear;
+        tex.wrapMode = TextureWrapMode.Repeat;
+        tex.Apply();
+        _humanOverlayTexture = tex;
+    }
+
+    private static bool IsTerritoryBorder(byte[] territory, int tw, int th, int cx, int cy, byte nation)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            int ny = cy + dy;
+            if (ny < 0 || ny >= th)
+                continue;
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                int nx = (cx + dx + tw) % tw;
+                if (territory[ny * tw + nx] != nation)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    private static Color32 NationTint(HumanGeographyData data, int nationIndex, byte alpha)
+    {
+        if (data.nations == null || nationIndex < 0 || nationIndex >= data.nations.Count)
+            return new Color32(200, 200, 200, alpha);
+
+        var n = data.nations[nationIndex];
+        byte r = (byte)Mathf.Clamp(n.r * 255f * 0.75f + 60f, 0f, 255f);
+        byte g = (byte)Mathf.Clamp(n.g * 255f * 0.75f + 60f, 0f, 255f);
+        byte b = (byte)Mathf.Clamp(n.b * 255f * 0.75f + 60f, 0f, 255f);
+        return new Color32(r, g, b, alpha);
+    }
+
+    private static void FillBlock(Color32[] pixels, int texW, int texH, int x0, int y0, int size, Color32 c)
+    {
+        for (int y = y0; y < y0 + size && y < texH; y++)
+        {
+            if (y < 0)
+                continue;
+            for (int x = x0; x < x0 + size && x < texW; x++)
+            {
+                if (x < 0)
+                    continue;
+                pixels[y * texW + x] = c;
+            }
+        }
+    }
+
+    private static void FillCircleUV(Color32[] pixels, int texW, int texH, float u, float v, int radius, Color32 c)
+    {
+        int cx = Mathf.RoundToInt(u * texW);
+        int cy = Mathf.RoundToInt(v * texH);
+        for (int y = -radius; y <= radius; y++)
+        {
+            int py = cy + y;
+            if (py < 0 || py >= texH)
+                continue;
+            for (int x = -radius; x <= radius; x++)
+            {
+                if (x * x + y * y > radius * radius)
+                    continue;
+                int px = ((cx + x) % texW + texW) % texW;
+                pixels[py * texW + px] = c;
+            }
+        }
+    }
+
+    private static void DrawLineUV(Color32[] pixels, int texW, int texH,
+        Vector2 a, Vector2 b, Color32 c, int width)
+    {
+        int x0 = Mathf.RoundToInt(a.x * texW);
+        int y0 = Mathf.RoundToInt(a.y * texH);
+        int x1 = Mathf.RoundToInt(b.x * texW);
+        int y1 = Mathf.RoundToInt(b.y * texH);
+
+        // 经度接缝：直接跨图绘制会拉出横贯整图的线，这里就近取短边
+        if (Mathf.Abs(x1 - x0) > texW / 2)
+        {
+            if (x1 > x0) x0 += texW; else x1 += texW;
+        }
+
+        int dx = Mathf.Abs(x1 - x0);
+        int dy = Mathf.Abs(y1 - y0);
+        int sx = x0 < x1 ? 1 : -1;
+        int sy = y0 < y1 ? 1 : -1;
+        int err = dx - dy;
+        int guard = Mathf.Min(4096, dx + dy + 4);
+
+        while (guard-- > 0)
+        {
+            for (int oy = -width / 2; oy <= width / 2; oy++)
+            {
+                int py = y0 + oy;
+                if (py < 0 || py >= texH)
+                    continue;
+                for (int ox = -width / 2; ox <= width / 2; ox++)
+                {
+                    int px = ((x0 + ox) % texW + texW) % texW;
+                    pixels[py * texW + px] = c;
+                }
+            }
+
+            if (x0 == x1 && y0 == y1)
+                break;
+            int e2 = 2 * err;
+            if (e2 > -dy) { err -= dy; x0 += sx; }
+            if (e2 < dx) { err += dx; y0 += sy; }
+        }
+    }
+
+    private void CreateHumanOverlaySphere()
+    {
+        if (earthRenderer == null)
+            return;
+
+        Transform earthTransform = earthRenderer.transform;
+        var overlayObj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        overlayObj.name = "HumanOverlay";
+        overlayObj.transform.SetParent(earthTransform, false);
+        overlayObj.transform.localScale = Vector3.one * 0.2065f;
+        Destroy(overlayObj.GetComponent<Collider>());
+
+        Shader shader = Shader.Find("Custom/PlateOverlayShader");
+        if (shader == null)
+            shader = Shader.Find("Diffuse");
+
+        var mat = new Material(shader);
+        mat.SetTexture("_MainTex", _humanOverlayTexture);
+        var renderer = overlayObj.GetComponent<Renderer>();
+        renderer.material = mat;
+
+        _humanOverlayObject = overlayObj;
+        _humanOverlayRenderer = renderer;
+    }
+
+    private void BuildHumanLabels(HumanGeographyData data)
+    {
+        if (earthRenderer == null)
+            return;
+
+        if (_humanLabelsParent == null)
+        {
+            _humanLabelsParent = new GameObject("HumanLabels").transform;
+            _humanLabelsParent.SetParent(transform);
+        }
+
+        Vector3 earthCenter = earthRenderer.transform.position;
+        float earthRadius = earthRenderer.bounds.extents.x;
+
+        for (int i = 0; i < data.settlements.Count; i++)
+        {
+            var s = data.settlements[i];
+            if (s.level < 2)
+                continue;                       // 村庄只画点，不挂标签，避免过密
+
+            Vector3 pos = UVToWorld(s.u, s.v, earthCenter, earthRadius);
+
+            var go = new GameObject($"Settlement_{i}");
+            go.transform.SetParent(_humanLabelsParent, true);
+            go.transform.position = pos;
+
+            var textMesh = go.AddComponent<TextMesh>();
+            textMesh.text = s.level >= 3
+                ? $"{s.name}\n{FormatPopulation(s.population)}"
+                : s.name;
+            textMesh.anchor = TextAnchor.LowerCenter;
+            textMesh.alignment = TextAlignment.Center;
+            textMesh.fontSize = 64;
+            textMesh.characterSize = s.level >= 4 ? 0.075f : (s.level == 3 ? 0.058f : 0.045f);
+            Color labelColor = s.level >= 4 ? new Color(1f, 0.92f, 0.62f)
+                             : (s.level == 3 ? new Color(1f, 1f, 1f) : new Color(0.86f, 0.90f, 0.95f));
+            textMesh.color = labelColor;
+
+            _humanLabelObjects.Add(go);
+            _humanLabelMeshes.Add(textMesh);
+            _humanLabelSizes.Add(textMesh.characterSize);
+            _humanLabelColors.Add(labelColor);
+        }
+    }
+
+    private static string FormatPopulation(int population)
+    {
+        if (population >= 10000000)
+            return $"{population / 10000000f:F1}千万";
+        if (population >= 10000)
+            return $"{population / 10000f:F0}万";
+        return population.ToString();
+    }
+
+    /// <summary>
+    /// 地名标签：只显示朝向相机那一面（转到地球背面即消失），
+    /// 并随距离缩放、始终面向相机，靠近地平线时渐隐。
+    /// </summary>
+    private void UpdateHumanLabels()
+    {
+        if (_humanLabelMeshes.Count == 0 || !_humanOverlayVisible)
+            return;
+
+        Camera cam = Camera.main;
+        if (cam == null || earthRenderer == null)
+            return;
+
+        Vector3 earthCenter = earthRenderer.transform.position;
+        float earthRadius = earthRenderer.bounds.extents.x;
+
+        Vector3 camPos = cam.transform.position;
+        Vector3 toCam = camPos - earthCenter;
+        float camDistance = toCam.magnitude;
+        if (camDistance < 1e-4f)
+            return;
+
+        Vector3 toCamDir = toCam / camDistance;
+
+        // 球面可见性阈值：半径 R 的球在距离 D 处，法线 n 的表面点可见 ⟺ n·(相机方向) > R/D
+        float horizon = earthRadius * 1.012f / camDistance;
+
+        for (int i = 0; i < _humanLabelMeshes.Count; i++)
+        {
+            var mesh = _humanLabelMeshes[i];
+            if (mesh == null)
+                continue;
+
+            Vector3 world = mesh.transform.position;
+            Vector3 normal = (world - earthCenter).normalized;
+            float facing = Vector3.Dot(normal, toCamDir) - horizon;
+
+            float distance = Vector3.Distance(camPos, world);
+            bool visible = facing > 0f && distance <= labelMaxDisplayDistance * 1.6f;
+
+            if (mesh.gameObject.activeSelf != visible)
+                mesh.gameObject.SetActive(visible);
+            if (!visible)
+                continue;
+
+            // 靠近地平线时淡出，避免突然跳出
+            Color c = _humanLabelColors[i];
+            c.a = Mathf.Clamp01(facing / 0.08f);
+            mesh.color = c;
+
+            // 贴在地表上方
+            mesh.transform.position = earthCenter + normal * (earthRadius * 1.012f);
+
+            float scale = distance / labelReferenceDistance;
+            mesh.characterSize = _humanLabelSizes[i] * Mathf.Max(0.35f, scale);
+
+            Vector3 dir = mesh.transform.position - camPos;
+            if (dir != Vector3.zero)
+                mesh.transform.rotation = Quaternion.LookRotation(dir);
+        }
     }
 
     #endregion

@@ -206,8 +206,12 @@ public class WorldTerrainGenerator : MonoBehaviour
             seed = seed,
             mapWidth = config.width,
             mapHeight = config.height,
-            generatedAt = DateTime.Now.ToString("o")
+            generatedAt = DateTime.Now.ToString("o"),
+            human = HumanMapSummary.From(result.human)
         });
+
+        // ── 人文图层随地图一起保存（<地图名>_human.json）──
+        HumanGeographyData.Save(baseName, result.human);
 
         // ── Apply terrain map and height map to Earth sphere ──
         if (EarthManager.Instance != null)
@@ -215,6 +219,9 @@ public class WorldTerrainGenerator : MonoBehaviour
             EarthManager.Instance.SetEarthSurface(terrainTex);
             EarthManager.Instance.SetEarthHeightMap(heightTex);
             EarthManager.Instance.SetPlateOverlay(overlayTex);
+
+            // 生成完立刻把人文图层叠加上去
+            EarthManager.Instance.SetHumanGeography(result.human, baseName);
         }
         else
         {
@@ -280,6 +287,13 @@ public class WorldTerrainGenerator : MonoBehaviour
                 config.width, config.height, heightField,
                 terrainTypes, hydrology, noise);
 
+            // Step 9: 人文（聚落 / 国家 / 交通 / 中文地名）
+            generationProgress = 0.93f;
+            var human = HumanGeographyGenerator.Generate(
+                config.width, config.height, heightField, hydrology,
+                config.axialTilt, noise, config.seed,
+                p => generationProgress = 0.93f + 0.06f * p);
+
             generationResult = new WorldGenResult
             {
                 width = config.width,
@@ -291,7 +305,8 @@ public class WorldTerrainGenerator : MonoBehaviour
                 terrainColors = terrainColors,
                 plateOverlayColors = plateOverlayColors,
                 axialTilt = config.axialTilt,
-                waterCoverage = config.waterCoverage
+                waterCoverage = config.waterCoverage,
+                human = human
             };
             generationProgress = 1.0f;
         }

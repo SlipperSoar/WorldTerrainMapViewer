@@ -160,5 +160,8 @@ namespace WorldTerrain
 
         /// <summary>本次生成使用的地图属性：水面占比（0-1）。</summary>
         public float waterCoverage;
+
+        /// <summary>人文图层：聚落、国家、交通线与自然地名。</summary>
+        public HumanGeographyData human;
     }
 }

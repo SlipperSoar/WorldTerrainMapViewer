@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using UnityEngine;
+using WorldTerrain;
 
 /// <summary>
 /// 地图元数据：与某张地形图绑定的属性（地轴倾角、水面占比等）。
@@ -34,6 +35,9 @@ public class MapMetaData
 
     /// <summary>生成时间（ISO 8601）。</summary>
     public string generatedAt = "";
+
+    /// <summary>人文信息摘要（聚落/国家/交通线数量，完整数据在同名 _human.json 中）。</summary>
+    public HumanMapSummary human = new HumanMapSummary();
 
     public static float ClampAxialTilt(float tilt)
     {

@@ -101,18 +101,44 @@ namespace WorldTerrain
         Glacier,
         Lake,
         River,
-        SeaIce
+        SeaIce,
+        /// <summary>季节性（间歇性）河流：集水区气候干旱，仅雨季有水</summary>
+        SeasonalRiver,
+        /// <summary>河口三角洲的分流河道与三角洲平原</summary>
+        Delta
     }
 
     /// <summary>
-    /// River and lake data produced by the hydrology pass.
+    /// 水文生成结果：河道、湖泊、河宽与各类水体掩膜。
     /// </summary>
     public struct HydrologyData
     {
+        /// <summary>河道掩膜（含加粗后的干流）</summary>
         public bool[] riverMask;
+
+        /// <summary>湖泊掩膜（被填平的洼地）</summary>
         public bool[] lakeMask;
+
+        /// <summary>河宽（像素），合流变宽、分流变窄</summary>
         public float[] riverWidth;
+
+        /// <summary>入海口（河流注入海洋的那一格）</summary>
         public bool[] estuaryMask;
+
+        /// <summary>季节性河流掩膜（集水区平均湿度低于气候干旱阈值）</summary>
+        public bool[] seasonalMask;
+
+        /// <summary>三角洲分流河道掩膜（浅海中的扇形河道）</summary>
+        public bool[] deltaMask;
+
+        /// <summary>有效流量（赤道等效格数），用于宽度与调试</summary>
+        public float[] discharge;
+
+        /// <summary>湖泊水深（米），非湖泊为 0；由填洼后的水面高程减原高程得到</summary>
+        public float[] waterDepth;
+
+        /// <summary>河道的集水区平均湿度（0-1），用于判定季节性河流</summary>
+        public float[] catchmentMoisture;
     }
 
     /// <summary>

@@ -252,10 +252,11 @@ public class WorldTerrainGenerator : MonoBehaviour
             var heightField = PlateTectonicsGenerator.GenerateHeights(
                 config, rng, plateIds, plates, noise);
 
-            // Step 4: Rivers and lakes
-            generationProgress = 0.55f;
+            // Step 4: 水文 —— 河网、湖泊、三角洲
+            generationProgress = 0.50f;
             var hydrology = HydrologyGenerator.Generate(
-                config.width, config.height, heightField);
+                config.width, config.height, heightField, noise,
+                p => generationProgress = 0.50f + 0.15f * p);
 
             // Steps 5-6: Terrain classification + 冰盖/雪线规则（依据地图的地轴倾角）
             generationProgress = 0.70f;

@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 
 namespace WorldTerrain
 {
@@ -35,7 +34,7 @@ namespace WorldTerrain
             TerrainType[] types = new TerrainType[w * h];
 
             // Step 5a: Compute distance-to-sea field (BFS from all ocean pixels)
-            int[] seaDist = ComputeSeaDistance(w, h, heightField);
+            int[] seaDist = ClimateModel.SeaDistance(w, h, heightField);
 
             // Step 5b: 雪线标定基准 —— 本地图最高的陆地海拔。
             // 经验公式给出的是真实海拔（赤道约 5 km），而生成地图的起伏通常只有
@@ -82,7 +81,7 @@ namespace WorldTerrain
                         // 雪线由「纬度 + 地轴倾角」的经验公式给出（见 PolarClimate），
                         // 并按地图自身起伏标定；湿度决定取区间下/上限：
                         // 湿润海洋性山地雪线低，干旱内陆山地雪线高。
-                        moisture = ComputeMoisture(absLat, seaDist[idx], noise, pos);
+                        moisture = ClimateModel.Moisture(absLat, seaDist[idx], noise, pos);
                         double snowLine = PolarClimate.SnowLineElevation(
                             absLat, axialTilt, maxLandElevation, moisture);
 
@@ -105,15 +104,22 @@ namespace WorldTerrain
                         }
                     }
 
-                    // ── Rivers and lakes ──
-                    if (hydrology.riverMask[idx])
-                    {
-                        types[idx] = TerrainType.River;
-                        continue;
-                    }
+                    // ── 水体：湖泊 / 三角洲 / 河流（含季节性河流）──
                     if (hydrology.lakeMask[idx])
                     {
                         types[idx] = TerrainType.Lake;
+                        continue;
+                    }
+                    if (hydrology.deltaMask != null && hydrology.deltaMask[idx])
+                    {
+                        types[idx] = TerrainType.Delta;
+                        continue;
+                    }
+                    if (hydrology.riverMask[idx])
+                    {
+                        types[idx] = hydrology.seasonalMask != null && hydrology.seasonalMask[idx]
+                            ? TerrainType.SeasonalRiver
+                            : TerrainType.River;
                         continue;
                     }
 
@@ -155,98 +161,6 @@ namespace WorldTerrain
         }
 
         // ── Private helpers ──
-
-        /// <summary>
-        /// BFS from all ocean pixels to compute distance-to-sea for every pixel.
-        /// </summary>
-        private static int[] ComputeSeaDistance(int w, int h, float[] heightField)
-        {
-            int[] dist = new int[w * h];
-            for (int i = 0; i < dist.Length; i++)
-                dist[i] = -1;
-
-            var queue = new Queue<int>();
-
-            for (int i = 0; i < w * h; i++)
-            {
-                if (heightField[i] <= 0f)
-                {
-                    dist[i] = 0;
-                    queue.Enqueue(i);
-                }
-            }
-
-            while (queue.Count > 0)
-            {
-                int idx = queue.Dequeue();
-                int x = idx % w;
-                int y = idx / w;
-                int d = dist[idx];
-
-                for (int dy = -1; dy <= 1; dy++)
-                {
-                    int ny = y + dy;
-                    if (ny < 0 || ny >= h)
-                        continue;
-                    for (int dx = -1; dx <= 1; dx++)
-                    {
-                        if (dx == 0 && dy == 0)
-                            continue;
-                        int nx = (x + dx + w) % w;
-                        int nIdx = ny * w + nx;
-                        if (dist[nIdx] < 0)
-                        {
-                            dist[nIdx] = d + 1;
-                            queue.Enqueue(nIdx);
-                        }
-                    }
-                }
-            }
-
-            for (int i = 0; i < dist.Length; i++)
-                if (dist[i] < 0)
-                    dist[i] = 9999;
-
-            return dist;
-        }
-
-        /// <summary>
-        /// Compute moisture based on latitude, distance to sea, and noise.
-        /// Models global atmospheric circulation patterns.
-        /// </summary>
-        private static double ComputeMoisture(
-            double absLat, int seaDist, SeededNoise noise, Vector3D pos)
-        {
-            // Base moisture from latitude (atmospheric circulation)
-            double baseMoisture;
-            if (absLat < 10)
-                baseMoisture = 0.8;                                      // Equatorial (ITCZ)
-            else if (absLat < 35)
-            {
-                double t = (absLat - 10.0) / 25.0;
-                baseMoisture = 0.8 - t * 0.6;                            // Subtropical dry zone
-            }
-            else if (absLat < 60)
-            {
-                double t = (absLat - 35.0) / 25.0;
-                baseMoisture = 0.2 + t * 0.4;                            // Temperate westerlies
-            }
-            else
-            {
-                double t = (absLat - 60.0) / 30.0;
-                baseMoisture = 0.6 - t * 0.5;                            // Polar dry
-            }
-
-            // Distance from sea factor
-            double distFactor = 1.0 / (1.0 + seaDist * 0.005);
-
-            // Noise variation
-            double noiseVal = noise.Noise3D(pos.x * 4.0, pos.y * 4.0, pos.z * 4.0);
-            double noiseFactor = (noiseVal - 0.5) * 0.4;
-
-            double moisture = baseMoisture * 0.5 + distFactor * 0.3 + noiseFactor + 0.2;
-            return Math.Max(0.0, Math.Min(1.0, moisture));
-        }
 
         /// <summary>
         /// Classify land terrain based on elevation, latitude, and moisture.

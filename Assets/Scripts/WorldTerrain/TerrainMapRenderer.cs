@@ -271,9 +271,16 @@ namespace WorldTerrain
                 return new Color(0.84f, 0.89f, 0.94f, 1f);
             }
 
-            // Estuary (river mouth): use ocean depth color, no river blue overlay
+            // Estuary (river mouth): 河口 —— 在浅海色上混入泥沙
             if (type == TerrainType.River && isEstuary)
-                return OceanDepthToColor(elevation, x, y, w, h, noise);
+            {
+                Color c = OceanDepthToColor(elevation, x, y, w, h, noise);
+                return new Color(
+                    c.r * 0.72f + 0.22f,
+                    c.g * 0.74f + 0.20f,
+                    c.b * 0.70f + 0.14f,
+                    1f);
+            }
 
             // River: blue (darker for wider rivers)
             if (type == TerrainType.River)
@@ -283,6 +290,28 @@ namespace WorldTerrain
                     0.24f - rw * 0.08f,
                     0.47f - rw * 0.08f,
                     0.66f,
+                    1f);
+            }
+
+            // Seasonal river: 季节性河流 —— 更淡、偏沙色，表示雨季才有水
+            if (type == TerrainType.SeasonalRiver)
+            {
+                float rw = Math.Min(1f, riverWidth / 3f);
+                return new Color(
+                    0.46f - rw * 0.06f,
+                    0.62f - rw * 0.05f,
+                    0.66f - rw * 0.02f,
+                    1f);
+            }
+
+            // Delta: 三角洲分流河道 —— 泥沙质浅水
+            if (type == TerrainType.Delta)
+            {
+                float rw = Math.Min(1f, riverWidth / 4f);
+                return new Color(
+                    0.60f - rw * 0.06f,
+                    0.76f - rw * 0.06f,
+                    0.70f - rw * 0.04f,
                     1f);
             }
 

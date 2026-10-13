@@ -17,7 +17,8 @@ public class SunLightController : MonoBehaviour
     private float yearDuration = 86400f;
 
     [SerializeField] private float currentDayOfYear = 0f;
-    [SerializeField] private float axialTilt = 23.5f;
+    [SerializeField, Range(0f, 90f), Tooltip("地轴倾角（度）。这是地图属性：载入地图时由地图元数据覆写")]
+    private float axialTilt = 23.5f;
     [SerializeField] private bool enableSeasons = false;
 
     [Header("References")] [SerializeField]
@@ -35,10 +36,16 @@ public class SunLightController : MonoBehaviour
 
     private float dayProgress = 0f;
     private float yearProgress = 0f;
-    private Quaternion initialEarthRotation;
 
     /// <summary>
-    /// 地轴倾角
+    /// 未施加地轴倾角时地球的朝向。地轴倾角始终以它为基准重新计算，
+    /// 因此可以在地图载入/滑动条拖动时反复改变倾角而不会累积旋转。
+    /// </summary>
+    private Quaternion baseEarthRotation;
+    private bool baseEarthRotationCaptured = false;
+
+    /// <summary>
+    /// 地轴倾角（度）——地图属性
     /// </summary>
     public float AxialTilt => axialTilt;
 
@@ -68,6 +75,13 @@ public class SunLightController : MonoBehaviour
     }
 
     #endregion
+
+    void Awake()
+    {
+        // 在任何人施加倾角之前记录地球的基准朝向（地轴倾角是地图属性，
+        // 运行时会被地图元数据反复修改）
+        CaptureBaseEarthRotation();
+    }
 
     void Start()
     {
@@ -117,17 +131,58 @@ public class SunLightController : MonoBehaviour
 
     private void InitializeEarthAxialTilt()
     {
-        if (earthTransform == null || !applyAxialTiltOnInit)
+        if (earthTransform == null)
         {
-            Debug.Log("Skipping Earth axial tilt initialization");
+            Debug.Log("Skipping Earth axial tilt initialization (no earth transform)");
             return;
         }
 
-        initialEarthRotation = earthTransform.rotation;
+        CaptureBaseEarthRotation();
 
-        earthTransform.Rotate(Vector3.right, axialTilt, Space.Self);
+        if (!applyAxialTiltOnInit)
+        {
+            Debug.Log("Skipping Earth axial tilt initialization (disabled)");
+            return;
+        }
+
+        ApplyAxialTiltToEarth();
 
         Debug.Log($"Applied Earth axial tilt: {axialTilt} degrees");
+    }
+
+    /// <summary>
+    /// 记录未施加倾角时地球的朝向，必须在任何倾角施加之前调用。
+    /// </summary>
+    private void CaptureBaseEarthRotation()
+    {
+        if (baseEarthRotationCaptured || earthTransform == null)
+            return;
+
+        baseEarthRotation = earthTransform.rotation;
+        baseEarthRotationCaptured = true;
+    }
+
+    /// <summary>
+    /// 以基准朝向重新计算地球朝向，避免反复设置倾角时累积旋转。
+    /// </summary>
+    private void ApplyAxialTiltToEarth()
+    {
+        if (earthTransform == null)
+            return;
+
+        CaptureBaseEarthRotation();
+        earthTransform.rotation = baseEarthRotation * Quaternion.Euler(axialTilt, 0f, 0f);
+    }
+
+    /// <summary>
+    /// 设置地轴倾角（度，0-90）。地轴倾角是地图属性，载入地图时由地图元数据
+    /// 调用；设置后地球朝向与阳光方向会立即更新。
+    /// </summary>
+    public void SetAxialTilt(float degrees)
+    {
+        axialTilt = Mathf.Clamp(degrees, 0f, 90f);
+        ApplyAxialTiltToEarth();
+        UpdateSunPosition();
     }
 
     private void UpdateSunPosition()
@@ -250,9 +305,7 @@ public class SunLightController : MonoBehaviour
         if (earthTransform == null)
             return;
 
-        earthTransform.rotation = initialEarthRotation;
-
-        earthTransform.Rotate(Vector3.right, axialTilt, Space.Self);
+        ApplyAxialTiltToEarth();
 
         Debug.Log($"Reset Earth axial tilt to: {axialTilt} degrees");
     }
@@ -262,7 +315,8 @@ public class SunLightController : MonoBehaviour
         if (earthTransform == null)
             return;
 
-        earthTransform.rotation = initialEarthRotation;
+        CaptureBaseEarthRotation();
+        earthTransform.rotation = baseEarthRotation;
 
         Debug.Log("Removed Earth axial tilt");
     }

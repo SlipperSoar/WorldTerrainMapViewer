@@ -30,6 +30,8 @@ public class UIController : MonoBehaviour
     private Button _seedRandomBtn;
     private Slider _waterSlider;
     private Label _waterValue;
+    private Slider _tiltSlider;
+    private Label _tiltValue;
     private Button _generateButton;
     private Label _genProgress;
     private ScrollView _markerList;
@@ -63,6 +65,7 @@ public class UIController : MonoBehaviour
     // State
     private bool _isUpdatingTimeSlider = false;
     private bool _isUpdatingSeasonSlider = false;
+    private float _pendingAxialTilt = MapMetaData.DefaultAxialTilt;
     private List<VisualElement> _mapItems = new List<VisualElement>();
     private List<VisualElement> _markerItems = new List<VisualElement>();
     private Texture2D _currentTexture;
@@ -182,6 +185,8 @@ public class UIController : MonoBehaviour
         _seedRandomBtn = _root.Q<Button>("seed-random-btn");
         _waterSlider = _root.Q<Slider>("water-slider");
         _waterValue = _root.Q<Label>("water-value");
+        _tiltSlider = _root.Q<Slider>("tilt-slider");
+        _tiltValue = _root.Q<Label>("tilt-value");
         _generateButton = _root.Q<Button>("generate-button");
         _genProgress = _root.Q<Label>("gen-progress-label");
         _markerList = _root.Q<ScrollView>("marker-list");
@@ -867,6 +872,9 @@ public class UIController : MonoBehaviour
                 EarthManager.Instance.SetPlateOverlayVisible(false);
             }
 
+            // 载入该地图自身的地图属性（地轴倾角等）
+            ApplyMapProperties(baseName);
+
             // Auto-load matching line data
             EarthManager.Instance.LoadLinesFromJSON(baseName);
 
@@ -990,6 +998,26 @@ public class UIController : MonoBehaviour
             _waterValue.text = $"{_waterSlider.value * 100:F0}%";
         }
 
+        // 地轴倾角：地图属性，生成时由该滑动条决定（0°-90°）
+        if (_tiltSlider != null)
+        {
+            _tiltSlider.lowValue = MapMetaData.MinAxialTilt;
+            _tiltSlider.highValue = MapMetaData.MaxAxialTilt;
+
+            float initialTilt = sunLightController != null
+                ? sunLightController.AxialTilt
+                : MapMetaData.DefaultAxialTilt;
+            _tiltSlider.value = MapMetaData.ClampAxialTilt(initialTilt);
+
+            _tiltSlider.RegisterValueChangedCallback(evt =>
+            {
+                // 该滑动条只是「下次生成」的参数，不实时改变星球：
+                // 星球显示的倾角必须始终等于当前这张地图生成时使用的倾角
+                UpdateTiltLabel(MapMetaData.ClampAxialTilt(evt.newValue));
+            });
+            UpdateTiltLabel(_tiltSlider.value);
+        }
+
         if (_generateButton != null)
         {
             _generateButton.clicked += OnGenerateButtonClicked;
@@ -1021,6 +1049,10 @@ public class UIController : MonoBehaviour
         }
 
         float waterCoverage = _waterSlider != null ? _waterSlider.value : 0.5f;
+        float axialTilt = _tiltSlider != null ? _tiltSlider.value : MapMetaData.DefaultAxialTilt;
+        axialTilt = MapMetaData.ClampAxialTilt(axialTilt);
+        _pendingAxialTilt = axialTilt;
+
         if (_genProgress != null)
             _genProgress.text = "生成中...";
 
@@ -1029,7 +1061,7 @@ public class UIController : MonoBehaviour
             WorldTerrainGenerator.Instance.onProgress = OnGenerationProgress;
             WorldTerrainGenerator.Instance.onComplete = OnGenerationComplete;
             WorldTerrainGenerator.Instance.onError = OnGenerationError;
-            WorldTerrainGenerator.Instance.GenerateWorld(seed, 0, waterCoverage);
+            WorldTerrainGenerator.Instance.GenerateWorld(seed, 0, waterCoverage, axialTilt);
         }
         else
         {
@@ -1048,6 +1080,11 @@ public class UIController : MonoBehaviour
         if (_genProgress != null)
             _genProgress.text = "生成完成";
         Debug.Log($"World generation complete: {path}");
+
+        // 生成使用的地轴倾角已经写入地图元数据，这里确保视觉状态一致
+        SetTiltSliderValue(_pendingAxialTilt);
+        ApplyAxialTiltToEarth(_pendingAxialTilt);
+
         LoadImagesFromStreamingAssets();
     }
 
@@ -1056,6 +1093,70 @@ public class UIController : MonoBehaviour
         if (_genProgress != null)
             _genProgress.text = "生成失败";
         Debug.LogError($"World generation error: {error}");
+    }
+
+    #endregion
+
+    #region Axial Tilt (地图属性)
+
+    private void UpdateTiltLabel(float tilt)
+    {
+        if (_tiltValue != null)
+            _tiltValue.text = $"{tilt:F1}°";
+    }
+
+    /// <summary>
+    /// 同步滑动条显示值（不触发回调）。
+    /// </summary>
+    private void SetTiltSliderValue(float tilt)
+    {
+        tilt = MapMetaData.ClampAxialTilt(tilt);
+
+        if (_tiltSlider != null)
+        {
+            _tiltSlider.lowValue = MapMetaData.MinAxialTilt;
+            _tiltSlider.highValue = MapMetaData.MaxAxialTilt;
+            _tiltSlider.SetValueWithoutNotify(tilt);
+        }
+
+        UpdateTiltLabel(tilt);
+    }
+
+    /// <summary>
+    /// 把地轴倾角应用到地球。编辑模式下只更新 UI，避免污染场景中的地球朝向。
+    /// </summary>
+    private void ApplyAxialTiltToEarth(float tilt)
+    {
+        tilt = MapMetaData.ClampAxialTilt(tilt);
+
+        if (!Application.isPlaying || sunLightController == null)
+            return;
+
+        sunLightController.SetAxialTilt(tilt);
+    }
+
+    /// <summary>
+    /// 载入地图时读取该地图自身的地轴倾角（地图元数据），
+    /// 并同步到滑动条与地球。
+    /// </summary>
+    private void ApplyMapProperties(string mapBaseName)
+    {
+        MapMetaData meta = MapMetaData.Load(mapBaseName);
+
+        float tilt = meta != null ? meta.axialTilt : MapMetaData.DefaultAxialTilt;
+        SetTiltSliderValue(tilt);
+        ApplyAxialTiltToEarth(tilt);
+
+        if (meta != null && _waterSlider != null)
+        {
+            _waterSlider.SetValueWithoutNotify(
+                Mathf.Clamp(meta.waterCoverage, _waterSlider.lowValue, _waterSlider.highValue));
+            if (_waterValue != null)
+                _waterValue.text = $"{_waterSlider.value * 100:F0}%";
+        }
+
+        if (meta != null)
+            Debug.Log($"Loaded map properties from '{mapBaseName}': axialTilt={tilt:F1}°");
     }
 
     #endregion

@@ -21,6 +21,10 @@ public class WorldTerrainGenerator : MonoBehaviour
     [SerializeField, Tooltip("水面占比（0.1=10%海洋 ~ 0.9=90%海洋）")]
     private float waterCoverage = 0.5f;
 
+    [Range(0f, 90f)]
+    [SerializeField, Tooltip("地轴倾角（0°-90°），地图属性：决定季节光照与冰盖分布")]
+    private float axialTilt = 23.5f;
+
     public Action<float> onProgress;
     public Action<string> onComplete;
     public Action<string> onError;
@@ -56,7 +60,8 @@ public class WorldTerrainGenerator : MonoBehaviour
     /// <param name="seed">Random seed (0 = system time)</param>
     /// <param name="height">Map height in pixels (0 = use defaultHeight)</param>
     /// <param name="waterCoverage">Fraction of surface that should be ocean (0-1, default 0.5)</param>
-    public void GenerateWorld(int seed, int height = 0, float waterCoverage = -1f)
+    /// <param name="axialTilt">地轴倾角（0-90 度），地图属性；&lt;0 时使用当前默认值</param>
+    public void GenerateWorld(int seed, int height = 0, float waterCoverage = -1f, float axialTilt = -1f)
     {
         if (isGenerating)
         {
@@ -70,7 +75,11 @@ public class WorldTerrainGenerator : MonoBehaviour
         if (waterCoverage < 0f)
             waterCoverage = this.waterCoverage;
 
-        StartCoroutine(GenerateWorldCoroutine(seed, height, waterCoverage));
+        if (axialTilt < 0f)
+            axialTilt = this.axialTilt;
+        axialTilt = MapMetaData.ClampAxialTilt(axialTilt);
+
+        StartCoroutine(GenerateWorldCoroutine(seed, height, waterCoverage, axialTilt));
     }
 
     public bool IsGenerating => isGenerating;
@@ -79,7 +88,7 @@ public class WorldTerrainGenerator : MonoBehaviour
 
     #region Private
 
-    private IEnumerator GenerateWorldCoroutine(int seed, int mapHeight, float waterCoverage)
+    private IEnumerator GenerateWorldCoroutine(int seed, int mapHeight, float waterCoverage, float axialTilt)
     {
         int mapWidth = mapHeight * 2;
         var config = new WorldGenConfig
@@ -91,7 +100,8 @@ public class WorldTerrainGenerator : MonoBehaviour
             maxPlates = 8,
             maxElevation = 10000f,
             minElevation = -10000f,
-            waterCoverage = waterCoverage
+            waterCoverage = waterCoverage,
+            axialTilt = axialTilt
         };
 
         generationProgress = 0f;
@@ -148,15 +158,13 @@ public class WorldTerrainGenerator : MonoBehaviour
         // ── Save PNGs to StreamingAssets ──
         string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         string seedStr = seed > 0 ? seed.ToString() : "rnd";
+        string baseName = $"gen_{seedStr}_{timestamp}";
         string heightPath = Path.Combine(
-            Application.streamingAssetsPath,
-            $"gen_{seedStr}_{timestamp}_height.png");
+            Application.streamingAssetsPath, baseName + "_height.png");
         string terrainPath = Path.Combine(
-            Application.streamingAssetsPath,
-            $"gen_{seedStr}_{timestamp}.png");
+            Application.streamingAssetsPath, baseName + ".png");
         string platePath = Path.Combine(
-            Application.streamingAssetsPath,
-            $"gen_{seedStr}_{timestamp}_plates.png");
+            Application.streamingAssetsPath, baseName + "_plates.png");
 
         // Create plate textures — save the transparent version as PNG so that
         // reloading from disk preserves the correct alpha for the overlay sphere
@@ -189,6 +197,17 @@ public class WorldTerrainGenerator : MonoBehaviour
             onError?.Invoke(e.Message);
             yield break;
         }
+
+        // ── Save map properties (地轴倾角等) alongside the map ──
+        MapMetaData.Save(baseName, new MapMetaData
+        {
+            axialTilt = config.axialTilt,
+            waterCoverage = config.waterCoverage,
+            seed = seed,
+            mapWidth = config.width,
+            mapHeight = config.height,
+            generatedAt = DateTime.Now.ToString("o")
+        });
 
         // ── Apply terrain map and height map to Earth sphere ──
         if (EarthManager.Instance != null)
@@ -238,11 +257,11 @@ public class WorldTerrainGenerator : MonoBehaviour
             var hydrology = HydrologyGenerator.Generate(
                 config.width, config.height, heightField);
 
-            // Steps 5-6: Terrain classification + glacier rules
+            // Steps 5-6: Terrain classification + 冰盖/雪线规则（依据地图的地轴倾角）
             generationProgress = 0.70f;
             var terrainTypes = TerrainClassifier.Classify(
                 config.width, config.height, heightField,
-                plateIds, hydrology, noise);
+                plateIds, hydrology, noise, config.axialTilt);
 
             // Step 5b: Render plate division map (transparent for overlay + PNG)
             generationProgress = 0.75f;
@@ -269,7 +288,9 @@ public class WorldTerrainGenerator : MonoBehaviour
                 terrainTypes = terrainTypes,
                 heightColors = heightColors,
                 terrainColors = terrainColors,
-                plateOverlayColors = plateOverlayColors
+                plateOverlayColors = plateOverlayColors,
+                axialTilt = config.axialTilt,
+                waterCoverage = config.waterCoverage
             };
             generationProgress = 1.0f;
         }

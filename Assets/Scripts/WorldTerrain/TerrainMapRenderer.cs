@@ -244,12 +244,31 @@ namespace WorldTerrain
             bool isEstuary,
             int x, int y, int w, int h, SeededNoise noise)
         {
-            // Glacier: continuous gray-white based on elevation
+            // Glacier: 陆地冰盖 / 高山冰川 —— 亮白偏冷色，随海拔增亮，
+            // 并叠加细密噪声模拟冰面纹理
             if (type == TerrainType.Glacier)
             {
-                double t = Math.Max(0.0, Math.Min(1.0, elevation / 4000.0));
-                double v = 0.75 + t * 0.22;
-                return new Color((float)v, (float)(v + 0.01), (float)(v + 0.02), 1f);
+                double t = Math.Max(0.0, Math.Min(1.0, elevation / 5000.0));
+                double v = 0.80 + t * 0.16;                 // 0.80 ~ 0.96
+
+                Vector3D pos = PlateTectonicsGenerator.PixelToSphere(x, y, w, h);
+                double grain = noise.Noise3D(pos.x * 18.0, pos.y * 18.0, pos.z * 18.0) - 0.5;
+                v += grain * 0.06;
+
+                v = Math.Max(0.0, Math.Min(1.0, v));
+                return new Color((float)v, (float)(v + 0.015), (float)(v + 0.035), 1f);
+            }
+
+            // Snow peak: 终年积雪的山峰，同样按冰盖颜色绘制
+            if (type == TerrainType.SnowPeak)
+            {
+                return new Color(0.95f, 0.96f, 0.98f, 1f);
+            }
+
+            // Sea ice: 海冰 —— 略带蓝调的白，比陆地冰盖稍暗
+            if (type == TerrainType.SeaIce)
+            {
+                return new Color(0.84f, 0.89f, 0.94f, 1f);
             }
 
             // Estuary (river mouth): use ocean depth color, no river blue overlay

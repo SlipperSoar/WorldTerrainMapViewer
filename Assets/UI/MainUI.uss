@@ -147,7 +147,32 @@
 #water-value {
     color: #4ECDC4;
     font-size: 12px;
-    width: 36px;
+    width: 40px;
+    -unity-text-align: middle-right;
+}
+
+/* ── 地轴倾角（地图属性）── */
+#tilt-row {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+#tilt-row > Label {
+    color: #888;
+    font-size: 12px;
+    width: 60px;
+}
+
+#tilt-slider {
+    flex-grow: 1;
+    margin-right: 4px;
+}
+
+#tilt-value {
+    color: #4ECDC4;
+    font-size: 12px;
+    width: 40px;
     -unity-text-align: middle-right;
 }
 

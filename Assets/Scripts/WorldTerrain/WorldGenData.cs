@@ -74,6 +74,7 @@ namespace WorldTerrain
         public float maxElevation;
         public float minElevation;
         public float waterCoverage;  // 0-1: fraction of surface that should be ocean
+        public float axialTilt;      // 地轴倾角（黄赤交角），0-90 度；地图属性
     }
 
     /// <summary>
@@ -99,7 +100,8 @@ namespace WorldTerrain
         Rainforest,
         Glacier,
         Lake,
-        River
+        River,
+        SeaIce
     }
 
     /// <summary>
@@ -126,5 +128,11 @@ namespace WorldTerrain
         public Color[] heightColors;
         public Color[] terrainColors;
         public Color[] plateOverlayColors;
+
+        /// <summary>本次生成使用的地图属性：地轴倾角（度）。</summary>
+        public float axialTilt;
+
+        /// <summary>本次生成使用的地图属性：水面占比（0-1）。</summary>
+        public float waterCoverage;
     }
 }

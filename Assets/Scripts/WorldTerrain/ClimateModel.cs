@@ -493,8 +493,17 @@ namespace WorldTerrain
             double axialTilt = 23.44)
         {
             // 纬向基础湿度：风带中心随季节迁移，取全年平均
-            double baseMoisture = SeaSourceMoisture(absLat, axialTilt);
+            return MoistureFromBase(SeaSourceMoisture(absLat, axialTilt), seaDist, noise, pos);
+        }
 
+        /// <summary>
+        /// 由「已经算好的纬向基础湿度」推湿度：只叠加大陆性与噪声。
+        /// 批量生成时按纬度预计算 base，可以避免逐格重复求解风带经验公式
+        /// （那里面有全年采样，逐格调用会让整张图慢好几秒）。
+        /// </summary>
+        public static double MoistureFromBase(double baseMoisture, int seaDist,
+            SeededNoise noise, Vector3D pos)
+        {
             // 大陆性：距海越远越干燥
             double continentality = Math.Exp(-seaDist / 70.0);
 

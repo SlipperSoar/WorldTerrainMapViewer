@@ -31,14 +31,24 @@ namespace WorldTerrain
         private const float FillEpsilon = 0.001f;
 
         /// <summary>
-        /// 判定为「显著湖泊」的门槛：连通面积占全图格数的比例（随地图尺寸缩放，
-        /// 以保持同一物理尺度）、绝对下限、盆地最大水深（米）与单格最小水深（米）。
-        /// 达不到门槛的洼地只用于汇流导向，不画成湖。
+        /// 湖泊门槛：只保留「水深足够」的洼地作为候选，是否真的积水交给水量平衡概率决定
+        /// （见 <see cref="MarkLakes"/>）—— 于是大盆地不一定是湖，小洼地也不一定是坑。
         /// </summary>
-        private const float MinLakeAreaRatio = 0.00019f;
-        private const int MinLakeCellsAbsolute = 24;
-        private const float MinLakeDepth = 8f;
+        private const float MinLakeDepth = 6f;
         private const float MinLakeCellDepth = 2f;
+
+        /// <summary>候选湖泊的最小连通格数（再小就只是噪声凹坑）。</summary>
+        private const int MinLakeCellsAbsolute = 3;
+
+        /// <summary>「够大」的参照格数：达到这个规模时，水量条件基本决定成败。</summary>
+        private const float LakeSizeReference = 400f;
+
+        /// <summary>成湖概率的总体增益（越大湖越多）。</summary>
+        private const float LakeProbabilityGain = 1.15f;
+
+        /// <summary>湖面蓄水比例的范围：湿润区接近灌满，干旱区只蓄一部分（季节性/盐湖）。</summary>
+        private const float LakeFillMin = 0.35f;
+        private const float LakeFillMax = 1.0f;
 
         /// <summary>高山径流加成：山顶相对海平面多出的径流比例。</summary>
         private const float OrographicBonus = 1.6f;
@@ -105,6 +115,18 @@ namespace WorldTerrain
             bool useProvidedMoisture = moistureField != null && moistureField.Length >= n;
             int[] seaDist = useProvidedMoisture ? null : ClimateModel.SeaDistance(w, h, heightField);
 
+            // 没有提供湿度场时，按纬度预计算每行的基础湿度（供逐格复用）
+            float[] rowMoistureBase = null;
+            if (!useProvidedMoisture)
+            {
+                rowMoistureBase = new float[h];
+                for (int y = 0; y < h; y++)
+                {
+                    double absLatY = Math.Abs(90.0 - (double)y / (h - 1) * 180.0);
+                    rowMoistureBase[y] = (float)ClimateModel.SeaSourceMoisture(absLatY);
+                }
+            }
+
             double[] rowCosLat = new double[h];
             double[] rowSinLat = new double[h];
             double[] colCosLon = new double[w];
@@ -138,7 +160,8 @@ namespace WorldTerrain
                     var pos = new Vector3D(rowCosLat[y] * colCosLon[x], rowSinLat[y],
                                            rowCosLat[y] * colSinLon[x]);
                     if (!useProvidedMoisture)
-                        moisture[i] = (float)ClimateModel.Moisture(absLat, seaDist[i], noise, pos);
+                        moisture[i] = (float)ClimateModel.MoistureFromBase(
+                            rowMoistureBase[y], seaDist[i], noise, pos);
 
                     // 汇流用的微起伏：只在 Priority-Flood 的排序键上叠加很小的相干噪声，
                     // 用来打散 D8 流向在平坦地形上产生的网格状直河道；
@@ -186,7 +209,8 @@ namespace WorldTerrain
 
             // ── 3. 湖泊 ──
             onProgress?.Invoke(0.35f);
-            MarkLakes(w, h, heightField, filled, data.lakeMask, data.waterDepth);
+            MarkLakes(w, h, heightField, filled, data.lakeMask, data.waterDepth,
+                noise, moistureField, rowMoistureBase);
 
             // ── 4. 汇流累积（含分流与渗漏） ──
             onProgress?.Invoke(0.45f);
@@ -312,16 +336,23 @@ namespace WorldTerrain
         // ── 3. 湖泊 ──
 
         /// <summary>
-        /// 被 Priority-Flood 抬高的洼地即湖泊；按连通域面积与水深过滤掉细碎凹陷。
+        /// 被 Priority-Flood 抬高的洼地即候选湖泊，但**不是够大就一定是湖**：
+        /// 由「水量平衡」决定成湖概率 ——
+        ///   湿润度（当地降水/汇水）越高、盆地越大越深 → 越可能是湖；
+        ///   干旱区的大盆地常常只是干盆地（盐湖/滩地），湿润区的小洼地也常蓄成小湖。
+        /// 再叠一层与地图种子绑定的稳定随机，于是湖的「有大有小」是自然分布，
+        /// 而不是一刀切的门槛。蓄水比例也会随湿润度变化，同一盆地可大湖可小湖。
         /// </summary>
         private static void MarkLakes(int w, int h, float[] heightField,
-            float[] filled, bool[] lakeMask, float[] waterDepth)
+            float[] filled, bool[] lakeMask, float[] waterDepth,
+            SeededNoise noise, float[] moistureField, float[] rowMoistureBase)
         {
             int n = w * h;
-            // 面积门槛随地图尺寸缩放，保证不同分辨率下「显著湖泊」的物理尺度一致
-            int minLakeCells = (int)(n * MinLakeAreaRatio);
-            if (minLakeCells < MinLakeCellsAbsolute)
-                minLakeCells = MinLakeCellsAbsolute;
+
+            int seedSalt = (int)(noise.Noise3D(12.34, 56.78, 90.12) * 1000000.0);
+
+            // 没有气候场时的逐行兜底湿度（由 Generate 预计算好，避免逐格求解经验公式）
+            float[] rowFallback = moistureField == null ? rowMoistureBase : null;
 
             bool[] pending = new bool[n];
             for (int i = 0; i < n; i++)
@@ -368,34 +399,88 @@ namespace WorldTerrain
                     }
                 }
 
-                if (maxDepth >= MinLakeDepth)
-                {
-                    // 只有真正被水淹得较深的格子算湖面；
-                    // 盆地边缘的薄水层（沼泽/滩地）仍按陆地处理，
-                    // 否则填洼会把大片浅平的洼地都画成湖。
-                    float waterLevel = heightField[spillIdx] + maxDepth;
-                    int marked = 0;
-                    for (int k = 0; k < component.Count; k++)
-                    {
-                        int idx = component[k];
-                        if (waterLevel - heightField[idx] >= MinLakeCellDepth)
-                            marked++;
-                    }
+                if (component.Count < MinLakeCellsAbsolute || maxDepth < MinLakeDepth)
+                    continue;
 
-                    if (marked >= minLakeCells)
-                    {
-                        for (int k = 0; k < component.Count; k++)
-                        {
-                            int idx = component[k];
-                            float depth = waterLevel - heightField[idx];
-                            if (depth < MinLakeCellDepth)
-                                continue;
-                            lakeMask[idx] = true;
-                            waterDepth[idx] = depth;
-                        }
-                    }
+                // ── 水量平衡：盆地能存住多少水 ──
+
+                // 流域湿润度：盆地自身及其周边（用格子的平均湿度近似汇水区的降水）
+                double wetSum = 0.0;
+                for (int k = 0; k < component.Count; k++)
+                    wetSum += CellMoisture(w, component[k], moistureField, rowFallback);
+
+                float wet = (float)(wetSum / component.Count);
+
+                // 规模：面积越大，汇水区越大（对数尺度，避免巨型盆地压倒一切）
+                float sizeNorm = (float)(Math.Log(component.Count / (double)MinLakeCellsAbsolute)
+                                       / Math.Log(LakeSizeReference / MinLakeCellsAbsolute));
+                if (sizeNorm < 0f) sizeNorm = 0f;
+                if (sizeNorm > 1f) sizeNorm = 1f;
+
+                // 深度也会有帮助：越深越不容易被蒸发干
+                float deepNorm = (maxDepth - MinLakeCellDepth) / 60f;
+                if (deepNorm < 0f) deepNorm = 0f;
+                if (deepNorm > 1f) deepNorm = 1f;
+
+                float supply = 0.05f + 0.95f * wet + 0.15f * deepNorm;
+                float probability = supply * (0.25f + 0.95f * sizeNorm) * LakeProbabilityGain;
+                if (probability > 1f) probability = 1f;
+
+                float dice = Hash01(spillIdx, seedSalt);
+                if (dice >= probability)
+                    continue;                        // 干盆地：不积水，仍是平坦的洼地
+
+                // ── 蓄水高度：湿润区接近灌满，干旱区只蓄一部分，于是湖面有大有小 ──
+                float fillDice = Hash01(spillIdx ^ 0x5F3759DF, seedSalt);
+                float fill = LakeFillMin + (LakeFillMax - LakeFillMin) * (0.55f * wet + 0.45f * fillDice);
+                if (fill > LakeFillMax) fill = LakeFillMax;
+
+                // 至少要淹过最深处，否则这个湖会凭空消失
+                float minFill = (MinLakeCellDepth + 0.5f) / Math.Max(maxDepth, 0.5f);
+                if (fill < minFill) fill = minFill;
+                if (fill > 1f) fill = 1f;
+
+                float waterLevel = heightField[spillIdx] + maxDepth * fill;
+                int marked = 0;
+                for (int k = 0; k < component.Count; k++)
+                    if (waterLevel - heightField[component[k]] >= MinLakeCellDepth)
+                        marked++;
+
+                if (marked < MinLakeCellsAbsolute)
+                    continue;
+
+                // 盆地边缘的薄水层（沼泽/滩地）仍按陆地处理
+                for (int k = 0; k < component.Count; k++)
+                {
+                    int idx = component[k];
+                    float depth = waterLevel - heightField[idx];
+                    if (depth < MinLakeCellDepth)
+                        continue;
+                    lakeMask[idx] = true;
+                    waterDepth[idx] = depth;
                 }
             }
+        }
+
+        /// <summary>取某格的湿度：优先用气候场，没有则退回按纬度预计算的每行湿度。</summary>
+        private static double CellMoisture(int w, int idx, float[] moistureField, float[] rowFallback)
+        {
+            if (moistureField != null && idx < moistureField.Length)
+                return moistureField[idx];
+
+            return rowFallback != null ? rowFallback[idx / w] : 0.4;
+        }
+
+        /// <summary>由格号与地图盐值算出的稳定随机数（0-1）：同一张图结果一致。</summary>
+        private static float Hash01(int index, int salt)
+        {
+            uint x = (uint)index * 2654435761u ^ (uint)salt * 2246822519u;
+            x ^= x >> 15;
+            x *= 2654435761u;
+            x ^= x >> 13;
+            x *= 2246822519u;
+            x ^= x >> 16;
+            return (x & 0xFFFFFF) / (float)0x1000000;
         }
 
         // ── 4. 汇流累积 ──

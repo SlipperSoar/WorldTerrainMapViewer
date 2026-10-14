@@ -63,6 +63,8 @@ public class UIController : MonoBehaviour
     private Toggle _plateOverlayToggle;
     private Toggle _terrainDisplacementToggle;
     private Toggle _humanOverlayToggle;
+    private Button _exportNamesButton;
+    private Button _importNamesButton;
     private int _lastColorIndex = -1;
     // State
     private bool _isUpdatingTimeSlider = false;
@@ -123,6 +125,7 @@ public class UIController : MonoBehaviour
         InitializePlateOverlayToggle();
         InitializeTerrainDisplacementToggle();
         InitializeHumanOverlayToggle();
+        InitializeNameTransferButtons();
         InitializeColorPalette();
         InitializeDrawModeButtons();
         InitializeWorldGeneration();
@@ -579,6 +582,48 @@ public class UIController : MonoBehaviour
         });
     }
 
+    /// <summary>
+    /// 地名导出/导入按钮：导出 &lt;地图名&gt;_names.json（含地理背景与空 name 字段），
+    /// 交给 AI 填好中文地名后原样导入，即可刷新到地图上。
+    /// </summary>
+    private void InitializeNameTransferButtons()
+    {
+        if (_generateButton == null || _generateButton.parent == null)
+            return;
+
+        var parent = _generateButton.parent;
+
+        _exportNamesButton = new Button(OnExportNamesClicked) { text = "导出地名请求" };
+        _exportNamesButton.AddToClassList("draw-button");
+        parent.Insert(parent.IndexOf(_generateButton) + 1, _exportNamesButton);
+
+        _importNamesButton = new Button(OnImportNamesClicked) { text = "导入地名" };
+        _importNamesButton.AddToClassList("draw-button");
+        parent.Insert(parent.IndexOf(_exportNamesButton) + 1, _importNamesButton);
+    }
+
+    private void OnExportNamesClicked()
+    {
+        if (EarthManager.Instance == null)
+            return;
+
+        string path = EarthManager.Instance.ExportNamingRequest();
+        if (_genProgress != null)
+            _genProgress.text = path != null
+                ? $"已导出 {Path.GetFileName(path)}"
+                : "当前地图没有人文数据";
+    }
+
+    private void OnImportNamesClicked()
+    {
+        if (EarthManager.Instance == null)
+            return;
+
+        var result = EarthManager.Instance.ImportNames();
+        if (_genProgress != null)
+            _genProgress.text = result.Describe();
+    }
+
     /// <summary>人文图层开关（势力范围 / 交通线 / 聚落与地名）</summary>
     private void InitializeHumanOverlayToggle()
     {
@@ -604,7 +649,8 @@ public class UIController : MonoBehaviour
         });
     }
 
-    private void UpdateAutoCycleToggleDisplay()    {
+    private void UpdateAutoCycleToggleDisplay()
+    {
         if (_autoCycleToggle == null || sunLightController == null)
             return;
 

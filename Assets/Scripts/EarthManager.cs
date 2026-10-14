@@ -962,6 +962,60 @@ public class EarthManager : MonoBehaviour
 
     public bool IsHumanOverlayVisible => _humanOverlayVisible;
 
+    /// <summary>
+    /// 导出当前地图的「命名请求」文件（&lt;地图名&gt;_names.json）：
+    /// 里面是每个聚落/自然要素/国家的地理与人文背景 + 空的 name 字段，
+    /// 可以直接交给 AI 批量起中文地名。返回写出的文件路径。
+    /// </summary>
+    public string ExportNamingRequest()
+    {
+        if (!HasHumanGeography)
+            return null;
+
+        return HumanGeographyData.ExportNamingRequest(_humanMapName, _humanData);
+    }
+
+    /// <summary>
+    /// 导入地名：默认读取 &lt;地图名&gt;_names.json（即导出后填好名字的同一份文件）。
+    /// 成功后刷新地球上的地名标签，并把结果写回 &lt;地图名&gt;_human.json。
+    /// 返回值带有「解析了多少条 / 应用了多少条」等细节，便于界面提示。
+    /// </summary>
+    public HumanGeographyData.NameImportResult ImportNames(string path = null)
+    {
+        var none = new HumanGeographyData.NameImportResult();
+        if (!HasHumanGeography)
+            return none;
+
+        if (string.IsNullOrEmpty(path))
+            path = HumanGeographyData.GetNamingRequestPath(_humanMapName);
+
+        var result = HumanGeographyData.ApplyNamesFromFile(path, _humanData);
+        if (result.applied > 0)
+        {
+            HumanGeographyData.Save(_humanMapName, _humanData);
+            RefreshHumanLabels();
+        }
+        return result;
+    }
+
+    /// <summary>按当前数据重建聚落地名标签（导入新地名后调用）。</summary>
+    private void RefreshHumanLabels()
+    {
+        for (int i = 0; i < _humanLabelObjects.Count; i++)
+            if (_humanLabelObjects[i] != null)
+                Destroy(_humanLabelObjects[i]);
+
+        _humanLabelObjects.Clear();
+        _humanLabelMeshes.Clear();
+        _humanLabelSizes.Clear();
+        _humanLabelColors.Clear();
+
+        if (_humanData != null && _humanData.HasContent)
+            BuildHumanLabels(_humanData);
+
+        SetHumanOverlayVisible(_humanOverlayVisible);
+    }
+
     private void ClearHumanGeography()
     {
         for (int i = 0; i < _humanLabelObjects.Count; i++)

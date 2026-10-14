@@ -353,6 +353,7 @@ namespace WorldTerrain
                 string name = CultureNameGenerator.NameSettlement(ctx, used, seed + i * 131 + 7);
                 var sd = new SettlementData
                 {
+                    id = $"s{i + 1:D3}",
                     name = name,
                     level = level[i],
                     population = (int)Math.Round(population[i]),
@@ -365,7 +366,29 @@ namespace WorldTerrain
                     cellY = s.cellY,
                     u = (s.cellX + 0.5f) / w,
                     v = (s.cellY + 0.5f) / h,
-                    features = BuildFeatureLabels(ctx)
+                    features = BuildFeatureLabels(ctx),
+                    lat = (float)(90.0 - (s.cellY + 0.5) / h * 180.0),
+                    lon = (float)((s.cellX + 0.5) / w * 360.0 - 180.0),
+                    elevation = (float)ctx.Elevation,
+                    moisture = (float)ctx.Moisture,
+                    summerTemp = (float)ctx.SummerTemp,
+                    nearRiver = ctx.NearRiver,
+                    nearLake = ctx.NearLake,
+                    onCoast = ctx.OnCoast,
+                    mountainous = ctx.Mountainous,
+                    snowy = ctx.Snowy,
+                    desert = ctx.Desert,
+                    forest = ctx.Forest,
+                    steppe = ctx.Steppe,
+                    tundra = ctx.Tundra,
+                    riverConfluence = ctx.RiverConfluence,
+                    delta = ctx.Delta,
+                    riverMouth = ctx.RiverMouth,
+                    mountainPass = ctx.MountainPass,
+                    hasIron = ctx.HasIron,
+                    hasCopper = ctx.HasCopper,
+                    hasGold = ctx.HasGold,
+                    hasSalt = ctx.HasSalt
                 };
                 data.settlements.Add(sd);
             }
@@ -389,6 +412,7 @@ namespace WorldTerrain
 
                 data.nations.Add(new NationData
                 {
+                    id = $"n{i + 1:D3}",
                     name = nationName,
                     polity = polity,
                     capitalIndex = capital,
@@ -845,10 +869,13 @@ namespace WorldTerrain
                 string name = CultureNameGenerator.NameNatural(ctx, NaturalFeatureKind.River, used, seed + 500 + k);
                 features.Add(new NamedFeatureData
                 {
+                    id = $"f{k + 1:D3}",
                     name = name,
                     kind = (int)NamedFeatureKind.River,
                     u = (x + 0.5f) / w,
                     v = (y + 0.5f) / h,
+                    lat = (float)(90.0 - (y + 0.5) / h * 180.0),
+                    lon = (float)((x + 0.5) / w * 360.0 - 180.0),
                     importance = Math.Min(1f, candidates[k].Key / 10f)
                 });
             }
@@ -901,10 +928,13 @@ namespace WorldTerrain
                     string name = CultureNameGenerator.NameNatural(ctx, NaturalFeatureKind.Lake, used, seed + 700 + k);
                     features.Add(new NamedFeatureData
                     {
+                        id = $"f{500 + k:D3}",
                         name = name,
                         kind = (int)NamedFeatureKind.Lake,
                         u = (x + 0.5f) / w,
                         v = (y + 0.5f) / h,
+                        lat = (float)(90.0 - (y + 0.5) / h * 180.0),
+                        lon = (float)((x + 0.5) / w * 360.0 - 180.0),
                         importance = Math.Min(1f, lakes[k].Key / 400f)
                     });
                 }

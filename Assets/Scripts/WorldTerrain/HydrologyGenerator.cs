@@ -81,8 +81,9 @@ namespace WorldTerrain
         /// <param name="heightField">高度场（米，海平面为 0）</param>
         /// <param name="noise">噪声（用于湿度场）</param>
         /// <param name="onProgress">阶段进度回调（0-1），可为 null</param>
+        /// <param name="moistureField">预先算好的湿度场（风带 + 雨影），null 时按纬度/距海自行计算</param>
         public static HydrologyData Generate(int width, int height, float[] heightField,
-            SeededNoise noise, Action<float> onProgress = null)
+            SeededNoise noise, Action<float> onProgress = null, float[] moistureField = null)
         {
             int w = width, h = height, n = w * h;
 
@@ -101,7 +102,8 @@ namespace WorldTerrain
 
             // ── 1. 湿度场 ──
             onProgress?.Invoke(0.05f);
-            int[] seaDist = ClimateModel.SeaDistance(w, h, heightField);
+            bool useProvidedMoisture = moistureField != null && moistureField.Length >= n;
+            int[] seaDist = useProvidedMoisture ? null : ClimateModel.SeaDistance(w, h, heightField);
 
             double[] rowCosLat = new double[h];
             double[] rowSinLat = new double[h];
@@ -120,7 +122,7 @@ namespace WorldTerrain
                 colSinLon[x] = Math.Sin(lon);
             }
 
-            float[] moisture = new float[n];
+            float[] moisture = useProvidedMoisture ? moistureField : new float[n];
             float[] jitter = new float[n];
             float maxLandElevation = 0f;
             for (int y = 0; y < h; y++)
@@ -135,7 +137,8 @@ namespace WorldTerrain
 
                     var pos = new Vector3D(rowCosLat[y] * colCosLon[x], rowSinLat[y],
                                            rowCosLat[y] * colSinLon[x]);
-                    moisture[i] = (float)ClimateModel.Moisture(absLat, seaDist[i], noise, pos);
+                    if (!useProvidedMoisture)
+                        moisture[i] = (float)ClimateModel.Moisture(absLat, seaDist[i], noise, pos);
 
                     // 汇流用的微起伏：只在 Priority-Flood 的排序键上叠加很小的相干噪声，
                     // 用来打散 D8 流向在平坦地形上产生的网格状直河道；

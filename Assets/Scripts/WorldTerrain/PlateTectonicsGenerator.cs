@@ -14,6 +14,23 @@ namespace WorldTerrain
         private static readonly int[] DY8 = { -1, -1, -1, 0, 0, 1, 1, 1 };
 
         /// <summary>
+        /// 地壳均衡幅度（米）：陆壳（硅铝层）比洋壳（硅镁层）更厚更轻，
+        /// 均衡补偿使大陆整体高出洋底数公里。
+        /// </summary>
+        private const double IsostasyAmplitude = 5000.0;
+
+        /// <summary>陆壳起伏放大系数：造山带集中在陆壳，洋壳更平缓（深海平原）。</summary>
+        private const double ContinentalReliefScale = 0.9;
+
+        /// <summary>转换到 [0,1] 的平滑过渡（用于地壳类型等软掩膜）。</summary>
+        private static double SmoothStep(double t)
+        {
+            if (t <= 0.0) return 0.0;
+            if (t >= 1.0) return 1.0;
+            return t * t * (3.0 - 2.0 * t);
+        }
+
+        /// <summary>
         /// Convert equirectangular pixel coordinates to a 3D unit-sphere position.
         /// x=0 → lon=-π, x=width-1 → lon≈π, y=0 → north pole, y=height-1 → south pole.
         /// </summary>
@@ -115,9 +132,11 @@ namespace WorldTerrain
         {
             int w = config.width, h = config.height;
             float[] heightField = new float[w * h];
+            float[] continental = new float[w * h];
 
             // (a) Pure noise-based height field — independent of plates.
             //     Land/sea emerges naturally where the field crosses 0m.
+            //     同时按低频噪声区分陆壳 / 洋壳，并施加地壳均衡与起伏差异。
             for (int y = 0; y < h; y++)
             {
                 for (int x = 0; x < w; x++)
@@ -130,6 +149,12 @@ namespace WorldTerrain
                         pos.x * 2.0, pos.y * 2.0, pos.z * 2.0) * 0.3;
                     double warpY = noise.Noise3D(
                         pos.x * 2.0 + 100, pos.y * 2.0 + 100, pos.z * 2.0 + 100) * 0.3;
+
+                    // 地壳类型：低频噪声 → 0 洋壳、1 陆壳（大陆成片而非随机碎块）
+                    double craton = noise.Fbm3D(
+                        pos.x * 1.1 + 17.0, pos.y * 1.1 + 17.0, pos.z * 1.1, 3, 0.5, 2.0);
+                    double cont = SmoothStep((craton - 0.36) / 0.28);
+                    continental[idx] = (float)cont;
 
                     // Layer 1: Large-scale terrain (mountain ranges, basins)
                     double n1 = noise.Fbm3D(
@@ -145,16 +170,23 @@ namespace WorldTerrain
                     double n3 = noise.Fbm3D(
                         pos.x * 15.0, pos.y * 15.0, pos.z * 15.0, 4, 0.5, 2.0);
 
+                    // 陆壳起伏更大（造山带），洋壳更平缓（深海平原）
+                    double reliefScale = 0.55 + ContinentalReliefScale * cont;
+
+                    // 地壳均衡：陆壳整体抬升、洋壳整体下沉
+                    double isostasy = (cont - 0.5) * IsostasyAmplitude;
+
                     // Map each layer from [0,1] to [-1,1], then scale — centered at 0
-                    heightField[idx] =
-                        (float)((n1 * 2.0 - 1.0) * 2500.0)   // [-2500, 2500]
-                      + (float)((n2 * 2.0 - 1.0) * 1200.0)   // [-1200, 1200]
-                      + (float)((n3 * 2.0 - 1.0) * 500.0);   // [-500, 500]
+                    heightField[idx] = (float)(
+                        (((n1 * 2.0 - 1.0) * 2500.0)    // [-2500, 2500]
+                       + ((n2 * 2.0 - 1.0) * 1200.0)    // [-1200, 1200]
+                       + ((n3 * 2.0 - 1.0) * 500.0))    // [-500, 500]
+                        * reliefScale + isostasy);
                 }
             }
 
-            // (b) Boundary effects from plate drift simulation
-            float[] boundaryEffect = ComputeBoundaryEffects(w, h, plateIds, plates, rng, noise);
+            // (b) Boundary effects from plate drift simulation（大陆边缘造山更强）
+            float[] boundaryEffect = ComputeBoundaryEffects(w, h, plateIds, plates, rng, noise, continental);
 
             // (c) Gaussian blur to diffuse boundary effects (sigma=40 → ~120px spread)
             float[] blurred = GaussianBlur(w, h, boundaryEffect, 40.0);
@@ -186,8 +218,9 @@ namespace WorldTerrain
         /// Shift all heights so that the given fraction of pixels is below sea level (0m).
         /// Uses a 256-bin histogram to find the percentile height, then offsets.
         /// waterCoverage=0.5 → 50% ocean; 0.7 → 70% ocean; 0.3 → 30% ocean.
+        /// 侵蚀会整体降低陆地，因此侵蚀后需要再调用一次，保持海陆比例不变。
         /// </summary>
-        private static void ApplyWaterCoverage(int w, int h, float[] heightField, float waterCoverage)
+        public static void ApplyWaterCoverage(int w, int h, float[] heightField, float waterCoverage)
         {
             float wc = (float)Math.Max(0.0, Math.Min(1.0, (double)waterCoverage));
             if (wc <= 0f || wc >= 1f)
@@ -353,7 +386,8 @@ namespace WorldTerrain
         /// then apply the cumulative effect to boundary pixels.
         /// </summary>
         private static float[] ComputeBoundaryEffects(
-            int w, int h, int[] plateIds, PlateInfo[] plates, Random rng, SeededNoise noise)
+            int w, int h, int[] plateIds, PlateInfo[] plates, Random rng, SeededNoise noise,
+            float[] continental)
         {
             float[] effect = new float[w * h];
             int numPlates = plates.Length;
@@ -432,6 +466,10 @@ namespace WorldTerrain
                                 pos.x * 6.0, pos.y * 6.0, pos.z * 6.0,
                                 4, 0.5, 2.0);
                             localEffect += (float)(ridge * 1600.0);
+
+                            // 地壳均衡：陆壳（厚而轻）碰撞时隆起更强烈，洋壳俯冲则以海沟为主
+                            double cont = continental != null ? continental[idx] : 1.0;
+                            localEffect *= (float)(0.5 + 0.9 * cont);
                         }
 
                         // Accumulate (take the strongest effect)

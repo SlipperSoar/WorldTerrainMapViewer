@@ -25,10 +25,12 @@ namespace WorldTerrain
         /// Steps 5–6 of the pipeline.
         /// </summary>
         /// <param name="axialTilt">地图属性：地轴倾角（度），决定冰盖范围与雪线高度</param>
+        /// <param name="moistureField">预先算好的湿度场（风带 + 雨影），null 时按纬度/距海自行计算</param>
         public static TerrainType[] Classify(
             int width, int height, float[] heightField,
             int[] plateIds, HydrologyData hydrology, SeededNoise noise,
-            float axialTilt = (float)PolarClimate.ReferenceTilt)
+            float axialTilt = (float)PolarClimate.ReferenceTilt,
+            float[] moistureField = null)
         {
             int w = width, h = height;
             TerrainType[] types = new TerrainType[w * h];
@@ -81,7 +83,9 @@ namespace WorldTerrain
                         // 雪线由「纬度 + 地轴倾角」的经验公式给出（见 PolarClimate），
                         // 并按地图自身起伏标定；湿度决定取区间下/上限：
                         // 湿润海洋性山地雪线低，干旱内陆山地雪线高。
-                        moisture = ClimateModel.Moisture(absLat, seaDist[idx], noise, pos);
+                        moisture = moistureField != null && moistureField.Length > idx
+                            ? moistureField[idx]
+                            : ClimateModel.Moisture(absLat, seaDist[idx], noise, pos);
                         double snowLine = PolarClimate.SnowLineElevation(
                             absLat, axialTilt, maxLandElevation, moisture);
 

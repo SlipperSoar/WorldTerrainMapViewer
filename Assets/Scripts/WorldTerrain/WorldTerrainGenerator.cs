@@ -259,17 +259,38 @@ public class WorldTerrainGenerator : MonoBehaviour
             var heightField = PlateTectonicsGenerator.GenerateHeights(
                 config, rng, plateIds, plates, noise);
 
-            // Step 4: 水文 —— 河网、湖泊、三角洲
+            // Step 3b: 气候场（纬向蒸发 + 盛行风带输送 + 迎风坡降水/雨影）
+            generationProgress = 0.34f;
+            float[] moisture = ClimateModel.ComputeMoistureField(
+                config.width, config.height, heightField, noise, config.axialTilt,
+                p => generationProgress = 0.34f + 0.03f * p);
+
+            // Step 3c: 侵蚀 —— 水力（雨滴冲刷河谷、下游沉积）+ 热力（休止角），
+            //          强度与降水耦合：湿润区冲刷更强
+            ErosionSimulator.Erode(config.width, config.height, heightField, moisture, config.seed,
+                p => generationProgress = 0.37f + 0.10f * p);
+
+            // 侵蚀会整体削低陆地，重新标定海平面以保持海陆比例
+            PlateTectonicsGenerator.ApplyWaterCoverage(
+                config.width, config.height, heightField, config.waterCoverage);
+
+            // 地形变了，复算一次气候：迎风坡与雨影随之改变（气候 ↔ 地形一次反馈）
+            generationProgress = 0.48f;
+            moisture = ClimateModel.ComputeMoistureField(
+                config.width, config.height, heightField, noise, config.axialTilt,
+                p => generationProgress = 0.48f + 0.02f * p);
+
+            // Step 4: 水文 —— 河网、湖泊、三角洲（用侵蚀后的地形与气候）
             generationProgress = 0.50f;
             var hydrology = HydrologyGenerator.Generate(
                 config.width, config.height, heightField, noise,
-                p => generationProgress = 0.50f + 0.15f * p);
+                p => generationProgress = 0.50f + 0.15f * p, moisture);
 
             // Steps 5-6: Terrain classification + 冰盖/雪线规则（依据地图的地轴倾角）
             generationProgress = 0.70f;
             var terrainTypes = TerrainClassifier.Classify(
                 config.width, config.height, heightField,
-                plateIds, hydrology, noise, config.axialTilt);
+                plateIds, hydrology, noise, config.axialTilt, moisture);
 
             // Step 5b: Render plate division map (transparent for overlay + PNG)
             generationProgress = 0.75f;
@@ -292,7 +313,7 @@ public class WorldTerrainGenerator : MonoBehaviour
             var human = HumanGeographyGenerator.Generate(
                 config.width, config.height, heightField, hydrology,
                 config.axialTilt, noise, config.seed,
-                p => generationProgress = 0.93f + 0.06f * p);
+                p => generationProgress = 0.93f + 0.06f * p, moisture);
 
             generationResult = new WorldGenResult
             {

@@ -54,7 +54,7 @@ namespace WorldTerrain
         /// <param name="onProgress">进度回调 0-1</param>
         public static HumanGeographyData Generate(int width, int height, float[] heightField,
             HydrologyData hydrology, float axialTilt, SeededNoise noise, int seed,
-            Action<float> onProgress = null)
+            Action<float> onProgress = null, float[] moistureField = null)
         {
             int w = width, h = height, n = w * h;
             var data = new HumanGeographyData { seed = seed, mapAspect = (float)w / h };
@@ -112,7 +112,9 @@ namespace WorldTerrain
                                - 5.5 * (elev / 1000.0);
                     temperature[i] = (float)t;
 
-                    double m = ClimateModel.Moisture(absLat, seaDist[i], noise, pos);
+                    double m = moistureField != null && moistureField.Length > i
+                        ? moistureField[i]
+                        : ClimateModel.Moisture(absLat, seaDist[i], noise, pos);
                     moisture[i] = (float)m;
 
                     // 地形起伏（与 8 邻域的高差）

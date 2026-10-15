@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using WorldTerrain;
 
 public class SunLightController : MonoBehaviour
 {
@@ -199,8 +200,7 @@ public class SunLightController : MonoBehaviour
 
         if (enableSeasons)
         {
-            float seasonOffset = axialTilt * (1f + Mathf.Sin(yearProgress * Mathf.PI * 2f));
-            sunDirection = Quaternion.Euler(seasonOffset, 0, 0) * sunDirection;
+            sunDirection = Quaternion.Euler(SeasonPitchDegrees(yearProgress), 0, 0) * sunDirection;
         }
 
         transform.rotation = Quaternion.LookRotation(-sunDirection);
@@ -213,10 +213,32 @@ public class SunLightController : MonoBehaviour
         float seasonOffset = 0f;
         if (enableSeasons)
         {
-            seasonOffset = axialTilt * (1f + Mathf.Sin(yearProgress * Mathf.PI * 2f));
+            seasonOffset = SeasonPitchDegrees(yearProgress);
         }
 
         transform.rotation = Quaternion.Euler(dayAngle, seasonOffset, 0);
+    }
+
+    /// <summary>
+    /// 季节摆角（度）：阳光方向绕 X 轴的俯仰。
+    ///
+    /// 太阳赤纬 δ 由地轴倾角与太阳黄经决定（春分为 λ=0，夏至 90°）：
+    ///     δ(λ) = arcsin(sin ε · sin λ)
+    /// 摆角本身要取 **ε − δ**：因为地轴倾角是施加在「地球」上的，
+    /// 阳光方向的俯仰必须同时抵消地球那侧的倾斜、再给出目标赤纬。
+    /// 设摆角为 θ 时，日下点纬度 = ε − θ，因此 θ = ε − δ 时正好得到 δ。
+    ///
+    /// 旧实现的 `ε·(1 + sin(2πy))` 有三处错：
+    ///   1. 取值恒在 [0, 2ε]，从不取负 —— 南半球永远没有真正的夏季；
+    ///   2. 夏至给 2ε、冬至给 0、春分给 ε，季节**整体反相**（北极在「夏至」背对太阳）；
+    ///   3. 春分（应 δ=0）拿到 δ=+ε。
+    /// 实测日下点纬度与理论赤纬的最大偏差达 **47°**（= 2ε）。
+    /// </summary>
+    private float SeasonPitchDegrees(float normalizedYear)
+    {
+        double dayOfYear = ClimateModel.SpringEquinoxDay + normalizedYear * ClimateModel.TropicalYear;
+        double declination = ClimateModel.SolarDeclination(axialTilt, dayOfYear);
+        return (float)(axialTilt - declination);
     }
 
     public void SetTimeOfDay(float time)

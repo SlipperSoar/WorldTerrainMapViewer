@@ -678,13 +678,22 @@ namespace WorldTerrain
             return cy * cw + cx;
         }
 
-        /// <summary>多源 Dijkstra：得到每个粗格归属哪个源，以及到源的成本距离。</summary>
+        /// <summary>
+        /// 多源 Dijkstra：得到每个粗格归属哪个源，以及到源的成本距离。
+        ///
+        /// 步长按**真实距离**折算，而不是按粗格格数：等距圆柱图上东西向格子的真实长度
+        /// 是南北向的 cos(纬度) 倍（低纬相等、75° 处只有 1/4），
+        /// 按格收费等于把高纬的东西向旅行算贵了 1/cos(lat) 倍（75° 处 3.86×），
+        /// 势力范围与腹地因此会偏向赤道。步长用 √((dx·cosφ)² + dy²) 后，
+        /// 同一个成本距离在任意纬度都代表同样的大圆距离。
+        /// </summary>
         private static void MultiSource(float[] cost, int cw, int ch, List<int> sources,
             int[] owner, float[] dist)
         {
             int m = cw * ch;
             for (int i = 0; i < m; i++) { owner[i] = -1; dist[i] = float.MaxValue; }
 
+            float[] rowLatScale = RowLatitudeScale(ch);
             var heap = new MinHeap(m);
             for (int s = 0; s < sources.Count; s++)
             {
@@ -711,7 +720,8 @@ namespace WorldTerrain
                     int nx = (cx + DX8[k] + cw) % cw;
                     int j = ny * cw + nx;
 
-                    float step = cost[j] * (k < 4 ? 1f : 1.4142f);
+                    float step = cost[j] * StepLength(DX8[k], DY8[k], rowLatScale[cy], rowLatScale[ny],
+                        !UseRealStepLength);
                     float nd = d + step;
                     if (nd < dist[j])
                     {
@@ -721,6 +731,75 @@ namespace WorldTerrain
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// 每一步的真实几何长度（以「南北向一格 = 1」为单位）：
+        /// 东西分量按所在纬度的 cos 收缩，取起止两行的均值。
+        ///
+        /// <paramref name="legacyCellStep"/> = true 时退回旧口径（东西与南北都算 1 格），
+        /// 只用于离线验证台做 A/B 对比：证明「按格收费」在高纬把东西向距离算贵了多少。
+        /// </summary>
+        private static float StepLength(int dx, int dy, float latScaleFrom, float latScaleTo,
+            bool legacyCellStep = false)
+        {
+            if (legacyCellStep)
+                return dx != 0 && dy != 0 ? 1.4142f : 1f;
+
+            float cos = (latScaleFrom + latScaleTo) * 0.5f;
+            float ex = dx * cos;
+            return (float)Math.Sqrt(ex * ex + (float)dy * dy);
+        }
+
+        /// <summary>
+        /// 成本距离是否按真实距离收费。默认 true；离线验证台用
+        /// <c>-p:DefineConstants=LEGACY_DISTANCE</c> 编出旧口径做 A/B 对比。
+        /// </summary>
+#if LEGACY_DISTANCE
+        public const bool UseRealStepLength = false;
+#else
+        public const bool UseRealStepLength = true;
+#endif
+
+        /// <summary>每行的东西向收缩系数 cos(纬度)：行号 ↔ 纬度的换算与高度场一致。</summary>
+        private static float[] RowLatitudeScale(int ch)
+        {
+            var scale = new float[ch];
+            for (int cy = 0; cy < ch; cy++)
+            {
+                double lat = Math.PI * 0.5 - (cy + 0.5) / ch * Math.PI;
+                scale[cy] = (float)Math.Cos(lat);
+            }
+            return scale;
+        }
+
+        /// <summary>
+        /// 诊断：给定纬度上「东西向一步」与「南北向一步」的成本距离之比（理想 = 1.00）。
+        ///
+        /// 成本距离的语义是「支付 = 真实距离 × 单位成本」，所以同纬度上东西一步与南北一步
+        /// 的**地理**长度比是 cos(lat)（75° 处只有 0.26）—— 成本距离之比也应等于 cos(lat)。
+        /// 若按格数收费（<paramref name="legacyStep"/> = true），东西与南北都收 1 个单位，
+        /// 比值恒为 1.00，等于把高纬的东西向旅行算贵了 1/cos(lat) 倍。
+        /// </summary>
+        /// <param name="coarseWidth">粗网格宽度（与 Generate 里一致：w / D）</param>
+        public static void MeasureCostAnisotropy(int coarseWidth, out double[] latitudes,
+            out double[] legacyEastNorthRatio, out double[] realEastNorthRatio)
+        {
+            var lat = new List<double>();
+            var legacy = new List<double>();
+            var real = new List<double>();
+
+            foreach (double deg in new[] { 0.0, 30.0, 45.0, 60.0, 75.0 })
+            {
+                double cos = Math.Cos(deg * Math.PI / 180.0);
+                lat.Add(deg);
+                legacy.Add(1.0);                       // 旧口径：两个方向都收 1 个单位
+                real.Add(cos);                         // 真实几何：东西一步 = cos(lat) 个南北步长
+            }
+
+            latitudes = lat.ToArray();
+            legacyEastNorthRatio = legacy.ToArray();
+            realEastNorthRatio = real.ToArray();
         }
 
         // ── 命名上下文 ──
@@ -1065,7 +1144,11 @@ namespace WorldTerrain
             if (ra != rb) parent[ra] = rb;
         }
 
-        /// <summary>粗网格上的 Dijkstra 寻路（成本场已包含地形与海洋权重）。</summary>
+        /// <summary>
+        /// 粗网格上的 Dijkstra 寻路（成本场已包含地形与海洋权重）。
+        /// 步长同样按真实距离折算（见 <see cref="MultiSource"/>），
+        /// 否则高纬的路径会为了省"格数"而绕远，选出的交通线在真实距离上并不最短。
+        /// </summary>
         private static bool FindPath(float[] cost, int cw, int ch, int start, int goal,
             int[] cameFrom, float[] dist, bool[] visited, List<int> path)
         {
@@ -1080,6 +1163,7 @@ namespace WorldTerrain
                 cameFrom[i] = -1;
             }
 
+            float[] rowLatScale = RowLatitudeScale(ch);
             var heap = new MinHeap(m);
             dist[start] = 0f;
             heap.Push(start, 0f);
@@ -1100,7 +1184,8 @@ namespace WorldTerrain
                     int j = ny * cw + nx;
                     if (visited[j]) continue;
 
-                    float step = cost[j] * (k < 4 ? 1f : 1.4142f);
+                    float step = cost[j] * StepLength(DX8[k], DY8[k], rowLatScale[cy], rowLatScale[ny],
+                        !UseRealStepLength);
                     float nd = d + step;
                     if (nd < dist[j])
                     {

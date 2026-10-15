@@ -255,9 +255,29 @@ public class WorldTerrainGenerator : MonoBehaviour
                 config.width, config.height, plates, noise);
 
             // Steps 2-3: Height field with drift-induced boundary effects
-            generationProgress = 0.30f;
-            var heightField = PlateTectonicsGenerator.GenerateHeights(
-                config, rng, plateIds, plates, noise);
+            float[] heightField;
+            float[] sphereRunoff = null;                    // 球面径流场（只有球面路径才有）
+            float sphereRunoffThreshold = 0f;
+            if (!config.planarGeneration)
+            {
+                // 球面生成域：在单位球面的等面积网格上生成大地形，再投影成等距圆柱图。
+                // 没有极点奇点、没有经度接缝，板块距离按球面角距计算。
+                generationProgress = 0.18f;
+                var sphere = SphericalTerrainGenerator.Generate(
+                    config, plates, noise, p => generationProgress = 0.18f + 0.12f * p);
+                heightField = sphere.Height;
+                sphereRunoff = sphere.Runoff;
+                sphereRunoffThreshold = sphere.RunoffChannelThreshold;
+            }
+            else
+            {
+                generationProgress = 0.30f;
+                heightField = PlateTectonicsGenerator.GenerateHeights(
+                    config, rng, plateIds, plates, noise);
+
+                // 平面路径没有球面径流场：水文自动退回平面判据，
+                // 不会像以前那样误用「上一张图留下的球面汇流」。
+            }
 
             // Step 3b: 气候场（纬向蒸发 + 盛行风带输送 + 迎风坡降水/雨影）
             generationProgress = 0.34f;
@@ -266,7 +286,10 @@ public class WorldTerrainGenerator : MonoBehaviour
                 p => generationProgress = 0.34f + 0.03f * p);
 
             // Step 3c: 侵蚀 —— 水力（雨滴冲刷河谷、下游沉积）+ 热力（休止角），
-            //          强度与降水耦合：湿润区冲刷更强
+            //          强度与降水耦合：湿润区冲刷更强。
+            //          球面路径已在球面格点上做过一次「大尺度」侵蚀（等面积、无极点接缝），
+            //          这里再在投影后的像素网格上做一次「细尺度」雕刻 —— 两级尺度互补：
+            //          球面那级决定山谷走向，这一级决定河谷的锐利程度。
             ErosionSimulator.Erode(config.width, config.height, heightField, moisture, config.seed,
                 p => generationProgress = 0.37f + 0.10f * p);
 
@@ -281,10 +304,13 @@ public class WorldTerrainGenerator : MonoBehaviour
                 p => generationProgress = 0.48f + 0.02f * p);
 
             // Step 4: 水文 —— 河网、湖泊、三角洲（用侵蚀后的地形与气候）
+            // 球面径流场显式传入：河网走向按球面真实汇流判定，平面汇流只决定河宽。
+            // 湖泊在像素网格上判定，但面积门槛按真实球面面积（cos lat）折算，纬度不失真。
             generationProgress = 0.50f;
             var hydrology = HydrologyGenerator.Generate(
                 config.width, config.height, heightField, noise,
-                p => generationProgress = 0.50f + 0.15f * p, moisture);
+                p => generationProgress = 0.50f + 0.15f * p, moisture,
+                sphereRunoff, sphereRunoffThreshold, config.axialTilt);
 
             // Steps 5-6: Terrain classification + 冰盖/雪线规则（依据地图的地轴倾角）
             generationProgress = 0.70f;

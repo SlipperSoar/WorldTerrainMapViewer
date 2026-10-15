@@ -37,14 +37,21 @@ namespace WorldTerrain
         private const float MinLakeDepth = 6f;
         private const float MinLakeCellDepth = 2f;
 
-        /// <summary>候选湖泊的最小连通格数（再小就只是噪声凹坑）。</summary>
+        /// <summary>候选湖泊的最小面积（赤道等效格数，见 <see cref="MarkLakes"/> 的面积口径）。</summary>
         private const int MinLakeCellsAbsolute = 3;
+
+        /// <summary>
+        /// 「实际积水面积」的放宽门槛：盆地的面积口径与其蓄水后的等效格数
+        /// 会因为浮点累加差一点点，门槛贴着 <see cref="MinLakeCellsAbsolute"/> 会误杀边缘盆地。
+        /// 取一半已经足够滤掉"水位抬起来但没淹到任何格"的情况。
+        /// </summary>
+        private const float MinLakeMarkedArea = MinLakeCellsAbsolute * 0.5f;
 
         /// <summary>「够大」的参照格数：达到这个规模时，水量条件基本决定成败。</summary>
         private const float LakeSizeReference = 400f;
 
         /// <summary>成湖概率的总体增益（越大湖越多）。</summary>
-        private const float LakeProbabilityGain = 1.15f;
+        private const float LakeProbabilityGain = 0.95f;
 
         /// <summary>湖面蓄水比例的范围：湿润区接近灌满，干旱区只蓄一部分（季节性/盐湖）。</summary>
         private const float LakeFillMin = 0.35f;
@@ -92,8 +99,17 @@ namespace WorldTerrain
         /// <param name="noise">噪声（用于湿度场）</param>
         /// <param name="onProgress">阶段进度回调（0-1），可为 null</param>
         /// <param name="moistureField">预先算好的湿度场（风带 + 雨影），null 时按纬度/距海自行计算</param>
+        /// <param name="runoffField">
+        /// 球面生成域的径流场（<see cref="SphereTerrainResult.Runoff"/>，已投影到本网格，长度 ≥ w×h）。
+        /// 传入时河道判据用它（球面等面积格点上的真实汇流），平面汇流累积只用来决定河宽；
+        /// 为 null 时退回平面判据（矩形生成域或外部高度图）。
+        /// </param>
+        /// <param name="runoffChannelThreshold">配合 <paramref name="runoffField"/> 的河道阈值分位（<see cref="SphereTerrainResult.RunoffChannelThreshold"/>）</param>
+        /// <param name="axialTilt">地轴倾角（度）：湖泊判定里没有气候场时的回退剖面用它</param>
         public static HydrologyData Generate(int width, int height, float[] heightField,
-            SeededNoise noise, Action<float> onProgress = null, float[] moistureField = null)
+            SeededNoise noise, Action<float> onProgress = null, float[] moistureField = null,
+            float[] runoffField = null, float runoffChannelThreshold = 0f,
+            float axialTilt = (float)PolarClimate.ReferenceTilt)
         {
             int w = width, h = height, n = w * h;
 
@@ -209,8 +225,21 @@ namespace WorldTerrain
 
             // ── 3. 湖泊 ──
             onProgress?.Invoke(0.35f);
+
+            // 没有气候场时按纬度预计算每行基础湿度（供逐格复用；用地图自身的地轴倾角）
+            float[] rowLakeMoisture = rowMoistureBase;
+            if (rowLakeMoisture == null)
+            {
+                rowLakeMoisture = new float[h];
+                for (int y = 0; y < h; y++)
+                {
+                    double absLatY = Math.Abs(90.0 - (double)y / (h - 1) * 180.0);
+                    rowLakeMoisture[y] = (float)ClimateModel.SeaSourceMoisture(absLatY, axialTilt);
+                }
+            }
+
             MarkLakes(w, h, heightField, filled, data.lakeMask, data.waterDepth,
-                noise, moistureField, rowMoistureBase);
+                noise, moistureField, rowLakeMoisture);
 
             // ── 4. 汇流累积（含分流与渗漏） ──
             onProgress?.Invoke(0.45f);
@@ -221,7 +250,8 @@ namespace WorldTerrain
 
             // ── 5. 河道提取与河宽 ──
             onProgress?.Invoke(0.70f);
-            ExtractRivers(w, h, heightField, riverThreshold, accum, moistFlux, moisture, data);
+            ExtractRivers(w, h, heightField, riverThreshold, accum, moistFlux, moisture, data,
+                runoffField, runoffChannelThreshold);
 
             // ── 6. 河口三角洲 ──
             onProgress?.Invoke(0.80f);
@@ -342,6 +372,11 @@ namespace WorldTerrain
         ///   干旱区的大盆地常常只是干盆地（盐湖/滩地），湿润区的小洼地也常蓄成小湖。
         /// 再叠一层与地图种子绑定的稳定随机，于是湖的「有大有小」是自然分布，
         /// 而不是一刀切的门槛。蓄水比例也会随湿润度变化，同一盆地可大湖可小湖。
+        ///
+        /// 门槛按**真实球面面积**算，而不是像素格数：等距圆柱图上一个像素的真实面积
+        /// 随纬度按 cos(lat) 收缩，同一个「格数」门槛在高纬实际放行的物理面积只有赤道的
+        /// 四分之一 —— 会凭空放大高纬的湖（实测 75°N 的湖泊密度是中低纬的 4 倍）。
+        /// 现在把盆地面积按行权重（cos lat）折算成「赤道等效格数」，门槛才对所有纬度一致。
         /// </summary>
         private static void MarkLakes(int w, int h, float[] heightField,
             float[] filled, bool[] lakeMask, float[] waterDepth,
@@ -361,6 +396,17 @@ namespace WorldTerrain
             var stack = new Stack<int>();
             var component = new List<int>();
 
+            // 每行的面积权重：等距圆柱图上一格的球面面积 ∝ cos(纬度)。
+            // 用行号而不是 y 反推纬度，是为了和 heightField 的行定义严格对齐。
+            var rowArea = new float[h];
+            for (int y = 0; y < h; y++)
+            {
+                double lat = Math.PI * 0.5 - (double)y / (h - 1) * Math.PI;
+                rowArea[y] = (float)Math.Cos(lat);
+                if (rowArea[y] < 0.01f)
+                    rowArea[y] = 0.01f;              // 极点行只占极小面积，别让它归零
+            }
+
             for (int start = 0; start < n; start++)
             {
                 if (!pending[start])
@@ -372,10 +418,12 @@ namespace WorldTerrain
 
                 float maxDepth = 0f;
                 int spillIdx = start;
+                double areaCells = 0.0;              // 赤道等效格数（真实面积 / 赤道一格面积）
                 while (stack.Count > 0)
                 {
                     int idx = stack.Pop();
                     component.Add(idx);
+                    areaCells += rowArea[idx / w];
 
                     float depth = filled[idx] - heightField[idx];
                     if (depth > maxDepth)
@@ -399,7 +447,7 @@ namespace WorldTerrain
                     }
                 }
 
-                if (component.Count < MinLakeCellsAbsolute || maxDepth < MinLakeDepth)
+                if (areaCells < MinLakeCellsAbsolute || maxDepth < MinLakeDepth)
                     continue;
 
                 // ── 水量平衡：盆地能存住多少水 ──
@@ -412,7 +460,7 @@ namespace WorldTerrain
                 float wet = (float)(wetSum / component.Count);
 
                 // 规模：面积越大，汇水区越大（对数尺度，避免巨型盆地压倒一切）
-                float sizeNorm = (float)(Math.Log(component.Count / (double)MinLakeCellsAbsolute)
+                float sizeNorm = (float)(Math.Log(areaCells / MinLakeCellsAbsolute)
                                        / Math.Log(LakeSizeReference / MinLakeCellsAbsolute));
                 if (sizeNorm < 0f) sizeNorm = 0f;
                 if (sizeNorm > 1f) sizeNorm = 1f;
@@ -441,12 +489,15 @@ namespace WorldTerrain
                 if (fill > 1f) fill = 1f;
 
                 float waterLevel = heightField[spillIdx] + maxDepth * fill;
-                int marked = 0;
+                double markedArea = 0.0;
                 for (int k = 0; k < component.Count; k++)
-                    if (waterLevel - heightField[component[k]] >= MinLakeCellDepth)
-                        marked++;
+                {
+                    int idx = component[k];
+                    if (waterLevel - heightField[idx] >= MinLakeCellDepth)
+                        markedArea += rowArea[idx / w];
+                }
 
-                if (marked < MinLakeCellsAbsolute)
+                if (markedArea < MinLakeMarkedArea)
                     continue;
 
                 // 盆地边缘的薄水层（沼泽/滩地）仍按陆地处理
@@ -594,12 +645,20 @@ namespace WorldTerrain
         /// 流量超过阈值的格子成为河道；河宽按流量幂律增长
         /// （支流汇合 → 流量跃升 → 河面变宽；主干分流 → 流量被分走 → 河面收窄）。
         /// </summary>
+        /// <param name="sphereRunoff">
+        /// 球面径流场（可为 null）。传入时判据用它 —— 语义是：河网走向完全交给球面径流场
+        /// （等面积格点上的真实汇流），平面累积只用于决定河宽。这样高纬不会再有沿纬线的伪河道，
+        /// 也不会出现"平面河网 + 球面河网"两套叠加。
+        /// </param>
+        /// <param name="sphereThreshold">球面径流的河道阈值分位；未传入径流场时忽略</param>
         private static void ExtractRivers(int w, int h, float[] heightField, float riverThreshold,
-            float[] accum, float[] moistFlux, float[] moisture, HydrologyData data)
+            float[] accum, float[] moistFlux, float[] moisture, HydrologyData data,
+            float[] sphereRunoff, float sphereThreshold)
         {
             int n = w * h;
             int riverCount = 0;
             int[] histogram = new int[102];      // 集水区湿度分布（1% 分箱）
+            bool hasSphere = sphereRunoff != null && sphereRunoff.Length >= n;
 
             for (int i = 0; i < n; i++)
             {
@@ -607,7 +666,10 @@ namespace WorldTerrain
                     continue;
                 if (data.lakeMask[i])            // 湖面单独绘制，不叠河道
                     continue;
-                if (accum[i] < riverThreshold)
+
+                float channelFlow = hasSphere ? sphereRunoff[i] : accum[i];
+                float channelThreshold = hasSphere ? sphereThreshold : riverThreshold;
+                if (channelFlow < channelThreshold)
                     continue;
 
                 float width = MinRiverWidth

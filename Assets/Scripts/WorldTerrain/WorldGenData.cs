@@ -75,6 +75,12 @@ namespace WorldTerrain
         public float minElevation;
         public float waterCoverage;  // 0-1: fraction of surface that should be ocean
         public float axialTilt;      // 地轴倾角（黄赤交角），0-90 度；地图属性
+
+        /// <summary>
+        /// false（默认）：在单位球面的等面积网格上生成地形，再投影成等距圆柱高度图（推荐）；
+        /// true：沿用旧的「直接在矩形网格上生成」路径，便于对比与回退。
+        /// </summary>
+        public bool planarGeneration;
     }
 
     /// <summary>

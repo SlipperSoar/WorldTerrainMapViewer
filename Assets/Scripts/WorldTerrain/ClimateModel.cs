@@ -13,8 +13,18 @@ namespace WorldTerrain
         private static readonly int[] DX8 = { -1, 0, 1, -1, 1, -1, 0, 1 };
         private static readonly int[] DY8 = { -1, -1, -1, 0, 0, 1, 1, 1 };
 
-        /// <summary>水汽在大陆上的衰减尺度（格）：约 90 格 ≈ 上千公里。</summary>
+        /// <summary>水汽在大陆上的衰减尺度（格）：约 90 格 ≈ 上千公里（赤道处）。</summary>
         private const double ContinentalScale = 90.0;
+
+        /// <summary>
+        /// 水汽衰减尺度（公里）——球面几何修正用。
+        /// 赤道处 90 格 × (40075 km / 地图宽度) ≈ 1800 km，因此这个取值保持原有赤道行为不变，
+        /// 只修正纬度依赖（等距圆柱投影下一格的实际东西向距离随 cos(lat) 收缩）。
+        /// </summary>
+        private const double ContinentalScaleKm = 1800.0;
+
+        /// <summary>地球周长（公里），用于把格数换算成实际距离。</summary>
+        private const double EarthCircumferenceKm = 40075.0;
 
         /// <summary>地形抬升的降水尺度（米）：上升这么多米，水汽大部分被拦下。</summary>
         private const double OrographicScale = 900.0;
@@ -382,7 +392,19 @@ namespace WorldTerrain
                     rowDy = 0.0;
                     stepLen = 1.0;
                 }
-                double inlandRetention = Math.Exp(-stepLen / ContinentalScale);
+
+                // 球面几何：等距圆柱投影下一格的实际东西向距离随纬度按 cos(lat) 收缩，经向基本不变。
+                // 按公里计算衰减，才不会把高纬的大陆性严重低估
+                // （原来每一格都衰减同样多，等于把极区当成赤道尺度的大陆）。
+                double cosLat = Math.Cos(latDeg * Math.PI / 180.0);
+                if (cosLat < 0.02)
+                    cosLat = 0.02;
+
+                double cellKmX = EarthCircumferenceKm * cosLat / w;
+                double cellKmY = EarthCircumferenceKm * 0.5 / h;
+                double stepKm = Math.Sqrt(rowDx * rowDx * cellKmX * cellKmX
+                                        + rowDy * rowDy * cellKmY * cellKmY);
+                double inlandRetention = Math.Exp(-stepKm / ContinentalScaleKm);
 
                 bool xForward = rowDx >= 0.0;
                 int xFrom = xForward ? 0 : w - 1;

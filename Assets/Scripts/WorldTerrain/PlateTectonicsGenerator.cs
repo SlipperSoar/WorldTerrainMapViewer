@@ -277,7 +277,7 @@ namespace WorldTerrain
         /// Create gradual continental shelf transitions near coastlines.
         /// Most coastal areas get a shallow shelf; ~15% keep steep drops.
         /// </summary>
-        private static void ApplyContinentalShelf(
+        public static void ApplyContinentalShelf(
             int w, int h, float[] heightField, SeededNoise noise)
         {
             // (1) BFS distance from land to all ocean pixels

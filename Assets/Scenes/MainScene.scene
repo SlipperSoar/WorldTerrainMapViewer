@@ -790,6 +790,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   defaultHeight: 1024
   waterCoverage: 0.5
+  axialTilt: 23.5
 --- !u!4 &1525155387
 Transform:
   m_ObjectHideFlags: 0
@@ -1028,6 +1029,7 @@ GameObject:
   m_Component:
   - component: {fileID: 2077428201}
   - component: {fileID: 2077428200}
+  - component: {fileID: 2077428202}
   m_Layer: 0
   m_HasEditorInfo: 1
   m_Name: '[EarthManager]'
@@ -1082,6 +1084,33 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2077428202
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2077428199}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7bf3ff40a0db43cdb36f725ee48c6007, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  earthRenderer: {fileID: 1772098532}
+  sunLight: {fileID: 705507994}
+  radiusScale: 1.008
+  coverage: 0.65
+  moistureInfluence: 0.55
+  waterInfluence: 0.3
+  sharpness: 5
+  noiseScale: 3
+  detailScale: 11
+  detailAmount: 0.35
+  flowSpeed: 0.02
+  maxOpacity: 0.92
+  cloudColor: {r: 1, g: 1, b: 1, a: 1}
+  shadowColor: {r: 0.42, g: 0.47, b: 0.58, a: 1}
+  silverLining: 0.65
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

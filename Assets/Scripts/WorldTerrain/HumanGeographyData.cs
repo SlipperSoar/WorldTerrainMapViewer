@@ -129,6 +129,99 @@ namespace WorldTerrain
             territoryBase64 = territory == null ? "" : Convert.ToBase64String(territory);
         }
 
+        // ── 云层用的湿度场 ──
+        //
+        // 云层预览需要「气候场」数据来决定哪里多云。生成时会算出湿度场
+        // （ClimateModel.ComputeMoistureField），但它没有单独落盘 —— 这里把降采样后的
+        // 湿度场（每格 1 字节）一并存进本文件，复用已有的 base64 机制，不新增文件。
+
+        /// <summary>云层湿度场的宽高与数据（等距圆柱投影，每格 1 字节 = 0-255 的湿度）。</summary>
+        public int moistureWidth;
+        public int moistureHeight;
+        public string moistureBase64 = "";
+
+        /// <summary>取湿度场字节（无数据时返回 null）。</summary>
+        public byte[] GetMoistureField()
+        {
+            if (string.IsNullOrEmpty(moistureBase64))
+                return null;
+            try
+            {
+                return Convert.FromBase64String(moistureBase64);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>保存降采样后的湿度场（供云层预览使用）。</summary>
+        public void SetMoistureField(byte[] field, int width, int height)
+        {
+            if (field == null || width <= 0 || height <= 0 || field.Length < width * height)
+            {
+                moistureWidth = 0;
+                moistureHeight = 0;
+                moistureBase64 = "";
+                return;
+            }
+
+            moistureWidth = width;
+            moistureHeight = height;
+            moistureBase64 = Convert.ToBase64String(field, 0, width * height);
+        }
+
+        /// <summary>
+        /// 把任意分辨率的湿度场降采样成云层用的低分辨率字节数组（每格 1 字节 = 0-255）。
+        /// 云层是低频效果，缩到 256×128 足够，且能把 JSON 体积控制在几十 KB。
+        /// 实际用的宽高通过 <paramref name="outWidth"/> / <paramref name="outHeight"/> 返回，
+        /// 避免调用方自己再算一遍导致不一致。
+        /// </summary>
+        public static byte[] DownsampleMoisture(float[] moisture, int w, int h, int targetW,
+            out int outWidth, out int outHeight)
+        {
+            outWidth = 0;
+            outHeight = 0;
+
+            if (moisture == null || w <= 0 || h <= 0 || moisture.Length < w * h)
+                return null;
+
+            int tw = Math.Max(8, Math.Min(targetW, w));
+            int th = Math.Max(4, tw * h / w);
+            outWidth = tw;
+            outHeight = th;
+            var result = new byte[tw * th];
+
+            for (int ty = 0; ty < th; ty++)
+            {
+                int y0 = ty * h / th;
+                int y1 = Math.Max(y0 + 1, (ty + 1) * h / th);
+                for (int tx = 0; tx < tw; tx++)
+                {
+                    int x0 = tx * w / tw;
+                    int x1 = Math.Max(x0 + 1, (tx + 1) * w / tw);
+
+                    float sum = 0f;
+                    int n = 0;
+                    for (int y = y0; y < y1; y++)
+                    {
+                        int row = y * w;
+                        for (int x = x0; x < x1; x++)
+                        {
+                            sum += moisture[row + x];
+                            n++;
+                        }
+                    }
+
+                    float v = n > 0 ? sum / n : 0f;
+                    int b = (int)Math.Round(Math.Max(0f, Math.Min(1f, v)) * 255f);
+                    result[ty * tw + tx] = (byte)b;
+                }
+            }
+
+            return result;
+        }
+
         public bool HasContent => settlements != null && settlements.Count > 0;
 
         public int CountOfLevel(int level)

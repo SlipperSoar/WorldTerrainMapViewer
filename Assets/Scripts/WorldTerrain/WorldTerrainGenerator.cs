@@ -341,6 +341,12 @@ public class WorldTerrainGenerator : MonoBehaviour
                 config.axialTilt, noise, config.seed,
                 p => generationProgress = 0.93f + 0.06f * p, moisture);
 
+            // 云层预览需要气候场数据：把湿度场降采样后随人文数据一起落盘
+            // （复用 _human.json，不新增文件；见 HumanGeographyData.SetMoistureField）
+            byte[] cloudMoisture = HumanGeographyData.DownsampleMoisture(
+                moisture, config.width, config.height, 256, out int mw, out int mh);
+            human.SetMoistureField(cloudMoisture, mw, mh);
+
             generationResult = new WorldGenResult
             {
                 width = config.width,

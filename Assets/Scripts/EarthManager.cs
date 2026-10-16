@@ -23,6 +23,9 @@ public class EarthManager : MonoBehaviour
     private Renderer _plateOverlayRenderer;
     private GameObject _plateOverlayObject;
 
+    /// <summary>云层预览（气候数据驱动）；可挂在本物体或子物体上。</summary>
+    private CloudLayer _cloudLayer;
+
     // Draw mode
     private bool _drawMode = false;
     private List<GameObject> _lineObjects = new List<GameObject>();
@@ -66,6 +69,8 @@ public class EarthManager : MonoBehaviour
         {
             CreateDefaultMarkerPrefab();
         }
+
+        _cloudLayer = GetComponentInChildren<CloudLayer>();
     }
 
     void Update()
@@ -74,6 +79,76 @@ public class EarthManager : MonoBehaviour
         HandleColorSelection();
         UpdateMarkerLabels();
         UpdateHumanLabels();
+    }
+
+    #endregion
+
+    #region 云层预览（气候数据驱动）
+
+    /// <summary>当前是否已建立云层（有 CloudLayer 组件即可，未必要有湿度数据）。</summary>
+    public bool HasCloudLayer => _cloudLayer != null;
+
+    /// <summary>云层是否可见。</summary>
+    public bool IsCloudLayerVisible => _cloudLayer != null && _cloudLayer.IsVisible;
+
+    /// <summary>云层是否拿到了气候湿度场（false = 均匀云量）。</summary>
+    public bool CloudLayerHasMoisture => _cloudLayer != null && _cloudLayer.HasMoisture;
+
+    /// <summary>
+    /// 显示/隐藏云层。第一次显示时才真正建立球壳，避免没用到时多一个球体。
+    /// </summary>
+    public void SetCloudLayerVisible(bool visible)
+    {
+        if (_cloudLayer == null)
+        {
+            _cloudLayer = GetComponentInChildren<CloudLayer>();
+            if (_cloudLayer == null)
+            {
+                Debug.LogWarning("EarthManager: 场景里没有 CloudLayer 组件，云层开关无效");
+                return;
+            }
+        }
+
+        _cloudLayer.SetEarthRenderer(earthRenderer);
+        _cloudLayer.SetVisible(visible);
+
+        // 刚显示时如果还没拿到湿度场，用当前地图的数据补上
+        if (visible && !_cloudLayer.HasMoisture)
+            UpdateCloudMoisture(_humanData);
+    }
+
+    /// <summary>设置云层基准云量（0-1）。</summary>
+    public void SetCloudCoverage(float coverage)
+    {
+        if (_cloudLayer != null)
+            _cloudLayer.SetCoverage(coverage);
+    }
+
+    /// <summary>季节进度（0-1，0 = 春分）：让云带随季节南北移动。</summary>
+    public void SetCloudSeasonProgress(float normalizedYear)
+    {
+        if (_cloudLayer != null)
+            _cloudLayer.SetSeasonProgress(normalizedYear);
+    }
+
+    /// <summary>
+    /// 把湿度场推给云层（没有数据时清除，云层退化为均匀云量）。
+    /// 湿度场存在 <c>&lt;地图名&gt;_human.json</c> 里，因此随人文数据一起更新。
+    /// </summary>
+    private void UpdateCloudMoisture(HumanGeographyData data)
+    {
+        if (_cloudLayer == null)
+            return;
+
+        byte[] moisture = data != null ? data.GetMoistureField() : null;
+        if (moisture != null && data.moistureWidth > 0 && data.moistureHeight > 0)
+        {
+            _cloudLayer.SetMoistureField(moisture, data.moistureWidth, data.moistureHeight);
+        }
+        else
+        {
+            _cloudLayer.ClearMoistureField();
+        }
     }
 
     #endregion
@@ -931,6 +1006,9 @@ public class EarthManager : MonoBehaviour
 
         _humanData = data;
         _humanMapName = mapBaseName;
+
+        // 云层预览的湿度场与人文数据存在同一个文件里，这里一起更新
+        UpdateCloudMoisture(data);
 
         if (data == null || !data.HasContent)
         {

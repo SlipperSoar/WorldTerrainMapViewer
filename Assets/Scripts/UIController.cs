@@ -62,6 +62,7 @@ public class UIController : MonoBehaviour
     private Button _saveLinesButton;
     private Toggle _plateOverlayToggle;
     private Toggle _terrainDisplacementToggle;
+    private Toggle _cloudLayerToggle;
     private Toggle _humanOverlayToggle;
     private Button _exportNamesButton;
     private Button _importNamesButton;
@@ -124,6 +125,7 @@ public class UIController : MonoBehaviour
         InitializeArrowToggle();
         InitializePlateOverlayToggle();
         InitializeTerrainDisplacementToggle();
+        InitializeCloudLayerToggle();
         InitializeHumanOverlayToggle();
         InitializeNameTransferButtons();
         InitializeColorPalette();
@@ -583,6 +585,49 @@ public class UIController : MonoBehaviour
     }
 
     /// <summary>
+    /// 云层预览开关：在星球外侧套一层半透明云层球壳，
+    /// 云的分布由地图的气候湿度场驱动（湿地多云、沙漠少云），并随风带流动。
+    /// </summary>
+    private void InitializeCloudLayerToggle()
+    {
+        if (_terrainDisplacementToggle == null || _terrainDisplacementToggle.parent == null)
+            return;
+
+        _cloudLayerToggle = new Toggle("云层");
+        _cloudLayerToggle.name = "cloud-layer-toggle";
+        _cloudLayerToggle.style.fontSize = 12;
+        _cloudLayerToggle.style.marginRight = 16;
+        _cloudLayerToggle.style.marginLeft = 4;
+        _cloudLayerToggle.style.flexShrink = 0;
+
+        var parent = _terrainDisplacementToggle.parent;
+        int index = parent.IndexOf(_terrainDisplacementToggle);
+        parent.Insert(index + 1, _cloudLayerToggle);
+
+        // 初始值取**云层的实际状态**，而不是写死 false 或 true：
+        // 否则会出现「开关没勾选、云层却显示」这类 UI 与画面不一致的情况。
+        bool initial = EarthManager.Instance != null && EarthManager.Instance.IsCloudLayerVisible;
+        _cloudLayerToggle.SetValueWithoutNotify(initial);
+
+        _cloudLayerToggle.RegisterValueChangedCallback(evt =>
+        {
+            if (EarthManager.Instance != null)
+                EarthManager.Instance.SetCloudLayerVisible(evt.newValue);
+        });
+
+        // 持续对齐：CloudLayer 在 Start 里才会按 startVisible 建好球壳并设显隐，
+        // 而那时本界面已初始化完毕，所以这里每帧把开关拉回真实状态（没有变化时不做任何事）。
+        _cloudLayerToggle.schedule.Execute(() =>
+        {
+            if (EarthManager.Instance == null)
+                return;
+            bool actual = EarthManager.Instance.IsCloudLayerVisible;
+            if (actual != _cloudLayerToggle.value)
+                _cloudLayerToggle.SetValueWithoutNotify(actual);
+        }).Every(200);
+    }
+
+    /// <summary>
     /// 地名导出/导入按钮：导出 &lt;地图名&gt;_names.json（含地理背景与空 name 字段），
     /// 交给 AI 填好中文地名后原样导入，即可刷新到地图上。
     /// </summary>
@@ -706,6 +751,10 @@ public class UIController : MonoBehaviour
                 float normalizedYear = seasonIndex / 40f;
                 sunLightController.SetDayOfYear(normalizedYear * sunLightController.YearDuration);
                 _seasonValue.text = FormatSeasonDisplay(seasonIndex);
+
+                // 云带随季节南北移动
+                if (EarthManager.Instance != null)
+                    EarthManager.Instance.SetCloudSeasonProgress(normalizedYear);
             });
             _seasonValue.text = FormatSeasonDisplay((int)_seasonSlider.value);
         }

@@ -213,6 +213,13 @@
 `earthRenderer` / `sunLight` 留空时会自动从场景里找。顶栏的「云层」开关会自动出现在
 「地形凹凸」右边（开关初值取自云层**实际**显隐状态，不会出现「没勾选却显示」）。
 
+> **顶栏开关的坑（Tuanjie 2022.3 实测）**：UI Toolkit 的 `Toggle` 默认样式会把内部
+> `unity-toggle__label` 的宽度**定死**（实测 150px，而文字只占 23px），
+> 同时把 `unity-toggle__input`（装着 24×24 勾选框的父级）宽度压成 **0** ——
+> 两者叠加就是「文字与勾选框之间一大片空白」甚至「勾选框被裁掉看不见」。
+> 修法是在代码里显式设回 `width:auto` / `flex-basis:auto`（标签）与固定宽度（输入区），
+> 见 `UIController.CompactToggleInternals`。只删 padding 是无效的，因为宽度不是 padding 撑出来的。
+
 #### 球壳尺寸是怎么定的
 
 `shellThickness`（默认 **0.12**）是**高出地表的厚度**，单位是星球半径的倍数，不是绝对尺寸。

@@ -303,14 +303,19 @@
 /* ── Top Bar ── */
 #top-bar {
     flex-shrink: 0;
-    flex-wrap: wrap;
+    /* 不换行：原来 flex-wrap: wrap 会在宽度不够时换行，把栏体撑高从而压到右侧栏上。
+       空间不足时宁可横向溢出，也不要把栏撑高。 */
+    flex-wrap: nowrap;
     flex-direction: row;
     align-items: center;
     background-color: rgba(15, 18, 28, 0.92);
     border-width: 1px;
     border-color: rgba(255, 255, 255, 0.08);
     border-radius: 8px;
-    padding: 6px 12px;
+    padding: 5px 10px;
+    /* 右侧给固定的右栏（140 + 8 + 8 = 156px）让位，避免重叠；左侧只做少量留白 */
+    margin-right: 164px;
+    margin-left: 8px;
 }
 
 .top-section {
@@ -341,15 +346,71 @@
     -unity-text-align: middle-right;
 }
 
-#autocycle-toggle, #arrow-toggle, #plate-overlay-toggle {
-    margin-right: 16px;
-    margin-left: 4px;
+#autocycle-toggle, #arrow-toggle, #plate-overlay-toggle,
+#terrain-displacement-toggle, #cloud-layer-toggle, #human-overlay-toggle {
+    margin-right: 2px;
+    margin-left: 0;
+    padding-left: 0;
+    padding-right: 0;
     flex-shrink: 0;
 }
 
+/* ── 开关（Toggle）紧凑化 ──
+   实测结构（Tuanjie 2022.3，由 UIController.ReportToggleLayout 打印）：
+     Toggle
+       [0] Label          class=unity-base-field__label,unity-toggle__label   默认宽 150px（文字只占约 23px）
+       [1] VisualElement  class=unity-base-field__input,unity-toggle__input   **默认宽 0**
+             [1.0] VisualElement name="unity-checkmark"                      24×24，被父级 0 宽裁掉 → 看不见
+
+   所以「看不见勾选框」与「文字和勾选框之间一片空白」是同一个原因：
+   输入区宽度为 0（勾选框被裁掉），而 label 的宽度被默认样式定死。
+
+   ⚠ 注意选择器范围：**只能用 .unity-toggle__* 这类 Toggle 专属类名**。
+   不要用 .unity-base-field__input / .unity-base-field__label —— 它们是基类，
+   滑条（Slider）、输入框（TextField）的内部结构也用这些类，会被一起改坏
+   （曾把「时间/流速/季节」滑条压成 24px 宽）。 */
+.unity-toggle,
+.unity-toggle__label,
+.unity-toggle__checkmark,
+.unity-base-toggle__checkmark {
+    flex-grow: 0;
+    padding-left: 0;
+    padding-right: 0;
+    margin-left: 0;
+    margin-right: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+/* 输入区是勾选框的父级：宽度为 0 会把 24px 的勾选框裁掉，必须给够宽度。
+   （精确到 Toggle 专属类名；基类会在代码里按实例设置，不影响滑条与输入框。） */
+.unity-toggle__input {
+    width: 24px;
+    min-width: 24px;
+    max-width: 24px;
+    flex-grow: 0;
+    flex-shrink: 0;
+    padding-left: 0;
+    padding-right: 0;
+    margin-left: 4px;
+    margin-right: 0;
+}
+
+/* 标签：默认样式把宽度定死了（实测 pl=0 pr=0 但 w 仍是 150px），
+   必须显式放回「按内容自适应」，光去掉 padding 不够。 */
 .unity-toggle__label {
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    flex-basis: auto;
+    flex-grow: 0;
+    flex-shrink: 0;
+    padding-left: 0;
+    padding-right: 0;
+    margin-left: 0;
+    margin-right: 2px;
     color: white;
-    font-size: 12px;
+    font-size: 11px;
     white-space: nowrap;
 }
 

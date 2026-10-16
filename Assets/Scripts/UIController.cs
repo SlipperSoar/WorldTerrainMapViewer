@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using UnityEngine;
 using UnityEngine.UIElements;
 using WorldTerrain;
@@ -127,6 +128,13 @@ public class UIController : MonoBehaviour
         InitializeTerrainDisplacementToggle();
         InitializeCloudLayerToggle();
         InitializeHumanOverlayToggle();
+
+        // UXML 里已有的两个开关也紧凑化（放在最后：新插入的开关此时都已就位）
+        MakeToggleCompact(_autoCycleToggle);
+        MakeToggleCompact(_arrowToggle);
+
+        // 布局自检：顶栏宽度超出可用空间时会压到右侧栏，这里一次性报出来
+        _root.schedule.Execute(ReportTopBarLayout).StartingIn(200);
         InitializeNameTransferButtons();
         InitializeColorPalette();
         InitializeDrawModeButtons();
@@ -534,19 +542,138 @@ public class UIController : MonoBehaviour
         });
     }
 
+    /// <summary>
+    /// 造一个紧凑开关（用于顶栏）。
+    ///
+    /// **只调间距，不增删 Toggle 内部元素**。
+    ///
+    /// 实测结构（Tuanjie 2022.3，见 <see cref="ReportToggleLayout"/> 打印）：
+    ///   Toggle
+    ///     [0] Label          class=unity-base-field__label,unity-toggle__label   默认宽 150px（文字只占约 28px）
+    ///     [1] VisualElement  class=unity-base-field__input,unity-toggle__input   **默认宽 0**
+    ///           [1.0] VisualElement name="unity-checkmark"                      24×24，被父级 0 宽裁掉 → 看不见
+    ///
+    /// 所以「看不见勾选框」和「文字与勾选框之间大片空白」是同一个原因：
+    /// 输入区宽度为 0，而 label 被默认样式的 padding 撑到 150px。
+    /// 这里给输入区固定宽度、把 label 的 padding 收掉。
+    /// </summary>
+    private static Toggle CreateCompactToggle(string text, string name, bool value)
+    {
+        var toggle = new Toggle(text)
+        {
+            name = name,
+            value = value,
+            style =
+            {
+                fontSize = 11,
+                flexShrink = 0,
+                flexGrow = 0,
+                marginLeft = 0,
+                marginRight = 0,
+                paddingLeft = 0,
+                paddingRight = 0,
+                flexDirection = FlexDirection.Row,
+                alignItems = Align.Center
+            }
+        };
+
+        CompactToggleInternals(toggle);
+        return toggle;
+    }
+
+    /// <summary>
+    /// 统一处理 Toggle 内部那两层的尺寸（label 收窄、输入区给宽度）。
+    /// UXML 里已有的 Toggle 也走这里。
+    /// </summary>
+    private static void CompactToggleInternals(Toggle toggle)
+    {
+        if (toggle == null)
+            return;
+
+        // ① 标签：实测默认宽 150px（文字只占约 28px），且 pl/pr 都是 0 ——
+        //    说明是默认样式把宽度定死了，必须显式放回「按内容自适应」。
+        Label label = toggle.labelElement;
+        if (label != null)
+        {
+            label.style.width = StyleKeyword.Auto;
+            label.style.minWidth = 0;
+            label.style.maxWidth = 10000f;      // 用一个大数明确解除上限（比 StyleKeyword.None 稳妥）
+            label.style.flexBasis = StyleKeyword.Auto;
+            label.style.flexGrow = 0;
+            label.style.flexShrink = 0;
+            label.style.paddingLeft = 0;
+            label.style.paddingRight = 0;
+            label.style.marginLeft = 0;
+            label.style.marginRight = 2;
+            label.style.whiteSpace = WhiteSpace.NoWrap;
+        }
+
+        // ② 输入区（勾选框的父级）：实测宽度为 0，必须给一个明确宽度，否则里面的勾选框被裁掉
+        VisualElement input = FindChildByClass(toggle, "unity-toggle__input");
+        if (input == null && toggle.childCount > 1)
+            input = toggle[1];                       // 结构固定时它就是第 2 个子元素
+
+        if (input != null)
+        {
+            input.style.width = CheckmarkSize;
+            input.style.minWidth = CheckmarkSize;
+            input.style.maxWidth = CheckmarkSize;
+            input.style.flexGrow = 0;
+            input.style.flexShrink = 0;
+            input.style.marginLeft = 4;
+            input.style.marginRight = 0;
+            input.style.paddingLeft = 0;
+            input.style.paddingRight = 0;
+            input.style.alignItems = Align.Center;
+            input.style.justifyContent = Justify.Center;
+        }
+    }
+
+    /// <summary>勾选框的边长（实测 24×24，输入区给这个宽度它才不会溢出）。</summary>
+    private const float CheckmarkSize = 24f;
+
+    /// <summary>按 USS 类名找直接子元素（避免依赖子元素下标）。</summary>
+    private static VisualElement FindChildByClass(VisualElement parent, string className)
+    {
+        if (parent == null)
+            return null;
+
+        for (int i = 0; i < parent.childCount; i++)
+        {
+            VisualElement child = parent[i];
+            if (child.ClassListContains(className))
+                return child;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// 把 UXML 里已有的 Toggle 也改造成紧凑版。
+    /// （UXML 里直接写的 Toggle 用默认样式，同样存在「标签被定宽、输入区 0 宽勾选框被裁掉」的问题。）
+    /// </summary>
+    private static void MakeToggleCompact(Toggle toggle)
+    {
+        if (toggle == null)
+            return;
+
+        toggle.style.flexShrink = 0;
+        toggle.style.flexGrow = 0;
+        toggle.style.marginRight = 0;
+        toggle.style.paddingLeft = 0;
+        toggle.style.paddingRight = 0;
+        toggle.style.flexDirection = FlexDirection.Row;
+        toggle.style.alignItems = Align.Center;
+
+        CompactToggleInternals(toggle);
+    }
+
     private void InitializePlateOverlayToggle()
     {
         if (_arrowToggle == null || _arrowToggle.parent == null)
             return;
 
         // Create the toggle programmatically to avoid UXML rendering issues
-        _plateOverlayToggle = new Toggle("断层带");
-        _plateOverlayToggle.name = "plate-overlay-toggle";
-        _plateOverlayToggle.value = true;
-        _plateOverlayToggle.style.fontSize = 12;
-        _plateOverlayToggle.style.marginRight = 16;
-        _plateOverlayToggle.style.marginLeft = 4;
-        _plateOverlayToggle.style.flexShrink = 0;
+        _plateOverlayToggle = CreateCompactToggle("断层带", "plate-overlay-toggle", true);
 
         // Insert after the arrow toggle
         var parent = _arrowToggle.parent;
@@ -565,13 +692,7 @@ public class UIController : MonoBehaviour
         if (_plateOverlayToggle == null || _plateOverlayToggle.parent == null)
             return;
 
-        _terrainDisplacementToggle = new Toggle("地形凹凸");
-        _terrainDisplacementToggle.name = "terrain-displacement-toggle";
-        _terrainDisplacementToggle.value = true;
-        _terrainDisplacementToggle.style.fontSize = 12;
-        _terrainDisplacementToggle.style.marginRight = 16;
-        _terrainDisplacementToggle.style.marginLeft = 4;
-        _terrainDisplacementToggle.style.flexShrink = 0;
+        _terrainDisplacementToggle = CreateCompactToggle("地形凹凸", "terrain-displacement-toggle", true);
 
         var parent = _plateOverlayToggle.parent;
         int plateIndex = parent.IndexOf(_plateOverlayToggle);
@@ -593,12 +714,7 @@ public class UIController : MonoBehaviour
         if (_terrainDisplacementToggle == null || _terrainDisplacementToggle.parent == null)
             return;
 
-        _cloudLayerToggle = new Toggle("云层");
-        _cloudLayerToggle.name = "cloud-layer-toggle";
-        _cloudLayerToggle.style.fontSize = 12;
-        _cloudLayerToggle.style.marginRight = 16;
-        _cloudLayerToggle.style.marginLeft = 4;
-        _cloudLayerToggle.style.flexShrink = 0;
+        _cloudLayerToggle = CreateCompactToggle("云层", "cloud-layer-toggle", false);
 
         var parent = _terrainDisplacementToggle.parent;
         int index = parent.IndexOf(_terrainDisplacementToggle);
@@ -675,13 +791,7 @@ public class UIController : MonoBehaviour
         if (_terrainDisplacementToggle == null || _terrainDisplacementToggle.parent == null)
             return;
 
-        _humanOverlayToggle = new Toggle("人文");
-        _humanOverlayToggle.name = "human-overlay-toggle";
-        _humanOverlayToggle.value = true;
-        _humanOverlayToggle.style.fontSize = 12;
-        _humanOverlayToggle.style.marginRight = 16;
-        _humanOverlayToggle.style.marginLeft = 4;
-        _humanOverlayToggle.style.flexShrink = 0;
+        _humanOverlayToggle = CreateCompactToggle("人文", "human-overlay-toggle", true);
 
         var parent = _terrainDisplacementToggle.parent;
         int index = parent.IndexOf(_terrainDisplacementToggle);
@@ -692,6 +802,72 @@ public class UIController : MonoBehaviour
             if (EarthManager.Instance != null)
                 EarthManager.Instance.SetHumanOverlayVisible(evt.newValue);
         });
+    }
+
+    /// <summary>
+    /// 顶栏布局自检（只在启动后跑一次）：
+    /// 报出顶栏实际宽度与可用空间，方便判断是否还会与左右两栏重叠。
+    /// 顶栏两侧各留 margin（右 164 / 左 8），所以能用的宽度是 root 宽度减去这两项。
+    /// </summary>
+    private void ReportTopBarLayout()
+    {
+        if (_root == null)
+            return;
+
+        VisualElement topBar = _root.Q<VisualElement>("top-bar");
+        if (topBar == null)
+            return;
+
+        float rootWidth = _root.resolvedStyle.width;
+        float barWidth = topBar.resolvedStyle.width;
+        float available = rootWidth - 164f - 8f;
+
+        if (barWidth <= 0f || rootWidth <= 0f)
+            return;                       // 布局还没算出来，本轮跳过
+
+        // 正常时不打日志；只有真的放不下才报警（顶栏过宽会盖住右侧栏）
+        if (barWidth > available)
+            Debug.LogWarning($"顶栏过宽：{barWidth:F0}px > 可用 {available:F0}px" +
+                             $"（窗口 {rootWidth:F0}px，两侧让位 172px），会与左右两栏重叠。" +
+                             "可考虑把「流速」「季节」两组收进侧边栏，或缩短开关文案。");
+
+        ReportToggleLayout();
+    }
+
+    /// <summary>
+    /// 自检 Toggle 的内部尺寸。两种异常都会让「文字与勾选框之间空白过大」甚至「看不见勾选框」：
+    ///   ① 标签被默认样式定宽（实测曾为 150px，而文字只占 23px）
+    ///   ② 输入区宽度为 0（它装着 24px 的勾选框，宽 0 会把勾选框裁掉）
+    /// 正常时**不输出任何日志**，只有异常才报警 —— 以后换引擎版本时能立刻发现。
+    /// </summary>
+    private void ReportToggleLayout()
+    {
+        if (_cloudLayerToggle == null || _cloudLayerToggle.childCount < 2)
+            return;
+
+        VisualElement label = _cloudLayerToggle[0];
+        VisualElement input = _cloudLayerToggle[1];
+
+        float labelWidth = label.resolvedStyle.width;
+        float inputWidth = input.resolvedStyle.width;
+
+        const float labelMaxExpected = 64f;      // 标签按内容自适应时只有二十几像素
+        bool labelTooWide = labelWidth > labelMaxExpected;
+        bool inputTooNarrow = inputWidth + 0.5f < CheckmarkSize;
+
+        if (!labelTooWide && !inputTooNarrow)
+            return;
+
+        var sb = new StringBuilder("顶栏开关尺寸异常：");
+        if (labelTooWide)
+            sb.Append($"标签被撑宽到 {labelWidth:F0}px（应在 {labelMaxExpected:F0}px 内），" +
+                      "文字与勾选框之间会留大片空白；");
+        if (inputTooNarrow)
+            sb.Append($"输入区仅 {inputWidth:F0}px，装不下 {CheckmarkSize:F0}px 的勾选框（会被裁掉看不见）；");
+        sb.Append($"\n  Toggle w={_cloudLayerToggle.resolvedStyle.width:F0}，" +
+                  $"Label w={labelWidth:F0}，Input w={inputWidth:F0}");
+
+        Debug.LogWarning(sb.ToString());
     }
 
     private void UpdateAutoCycleToggleDisplay()

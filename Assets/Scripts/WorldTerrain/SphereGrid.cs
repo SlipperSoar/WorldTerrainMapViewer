@@ -153,7 +153,50 @@ namespace WorldTerrain
             return level;
         }
 
-        /// <summary>创建细分 level 级的球面网格。</summary>
+        // ── 网格缓存 ──
+        //
+        // 同一 level 的 icosphere 每次生成都完全一样，但重建一次要「细分 + 去重 + 建邻接」，
+        // 实测 level 8 要 227 ms、level 7 要 65 ms，而且全程串行 —— 它正好落在
+        // 「(a) 板块/陆壳/大地形」的计时窗口里，把那一阶段的并行加速比从 ~10× 压成 1.66×。
+        //
+        // 网格的所有数组都是 readonly，全项目没有任何写入（已核对），因此可以安全复用。
+        // 只保留最近用到的两个 level（一次生成只用得上一个），避免大分辨率来回切换时
+        // 把几十 MB 的旧网格一直攥在手里。
+        private static readonly object CacheLock = new object();
+        private static readonly Dictionary<int, SphereGrid> Cache = new Dictionary<int, SphereGrid>(2);
+
+        /// <summary>
+        /// 取得指定 level 的球面网格，**复用已构建的实例**（结果只读，不要修改）。
+        /// 与 <see cref="Create"/> 完全等价，只是省掉了重复构建。
+        /// </summary>
+        public static SphereGrid Get(int level)
+        {
+            if (level < 0) level = 0;
+            if (level > 8) level = 8;
+
+            lock (CacheLock)
+            {
+                if (Cache.TryGetValue(level, out SphereGrid cached))
+                    return cached;
+
+                // 只留两个，够「当前图 + 上一张图」用
+                if (Cache.Count >= 2)
+                    Cache.Clear();
+
+                var grid = Create(level);
+                Cache[level] = grid;
+                return grid;
+            }
+        }
+
+        /// <summary>清空网格缓存（切换地图类型或需要回收内存时调用）。</summary>
+        public static void ClearCache()
+        {
+            lock (CacheLock)
+                Cache.Clear();
+        }
+
+        /// <summary>创建细分 level 级的球面网格（每次新建实例；需要复用时用 <see cref="Get"/>）。</summary>
         public static SphereGrid Create(int level)
         {
             if (level < 0) level = 0;
@@ -221,15 +264,18 @@ namespace WorldTerrain
         {
             int n = values.Length;
             var buffer = new float[n];
+
+            // Jacobi 迭代：每一趟都只读 values、只写 buffer[i]，与下标顺序无关，
+            // 所以并行后逐位相同（每个 i 的邻域求和顺序没变）。
             for (int pass = 0; pass < passes; pass++)
             {
-                for (int i = 0; i < n; i++)
+                Parallelism.For(n, i =>
                 {
                     int start = NeighborStart[i], end = NeighborStart[i + 1];
                     if (end <= start)
                     {
                         buffer[i] = values[i];
-                        continue;
+                        return;
                     }
 
                     float sum = 0f;
@@ -237,7 +283,7 @@ namespace WorldTerrain
                         sum += values[Neighbors[k]];
 
                     buffer[i] = values[i] + rate * (sum / (end - start) - values[i]);
-                }
+                });
 
                 Array.Copy(buffer, values, n);
             }

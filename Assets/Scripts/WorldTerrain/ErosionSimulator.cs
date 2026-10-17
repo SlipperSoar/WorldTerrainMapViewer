@@ -50,6 +50,8 @@ namespace WorldTerrain
         {
             int w = width, h = height, n = w * h;
 
+            // 最高点保持串行：它只是一次线性扫描（约 1 ms），而一旦算错 scale，
+            // 整个侵蚀结果都会变。并行归约需要额外同步，不值得为这点开销冒险。
             float maxLand = 0f;
             for (int i = 0; i < n; i++)
                 if (heightField[i] > maxLand)
@@ -60,8 +62,7 @@ namespace WorldTerrain
             // 归一化到 ~0..1 的「侵蚀空间」，使算法参数与地形绝对高度无关
             float scale = 1f / maxLand;
             var map = new float[n];
-            for (int i = 0; i < n; i++)
-                map[i] = heightField[i] * scale;
+            Parallelism.For(n, i => map[i] = heightField[i] * scale);
 
             onProgress?.Invoke(0.02f);
 
@@ -156,9 +157,8 @@ namespace WorldTerrain
             float talus = 0.06f;                     // 归一化高度下的最大稳定坡降
             ThermalErode(w, h, map, ThermalIterations, talus, ThermalRate);
 
-            // 写回
-            for (int i = 0; i < n; i++)
-                heightField[i] = map[i] / scale;
+            // 写回（每格只写自己的槽位）
+            Parallelism.For(n, i => heightField[i] = map[i] / scale);
 
             onProgress?.Invoke(1f);
         }
@@ -261,21 +261,32 @@ namespace WorldTerrain
 
         /// <summary>
         /// 热力侵蚀：坡降超过休止角时，多余的物质向最低邻居移动，使陡坡整体变缓。
+        ///
+        /// 并行化要点：邻域扫描只读 map、可并行；但一次搬运会写 delta[i] 和 delta[lowest]，
+        /// 而 lowest 可能落在别的线程负责的槽位上，直接并行会丢更新。
+        /// 因此拆成两趟：并行扫描只记录「搬多少 / 搬到哪」，再串行按原下标顺序累加 ——
+        /// 加法顺序与原来的单循环完全相同，结果逐位一致。
         /// </summary>
         private static void ThermalErode(int w, int h, float[] map, int iterations, float talus, float rate)
         {
             int n = w * h;
             var delta = new float[n];
+            var moveAmount = new float[n];
+            var moveTarget = new int[n];
 
             for (int it = 0; it < iterations; it++)
             {
                 Array.Clear(delta, 0, n);
 
-                for (int y = 0; y < h; y++)
+                Parallelism.ForRows(h, y =>
                 {
+                    int row = y * w;
                     for (int x = 0; x < w; x++)
                     {
-                        int i = y * w + x;
+                        int i = row + x;
+                        moveAmount[i] = 0f;
+                        moveTarget[i] = -1;
+
                         float h0 = map[i];
 
                         int lowest = -1;
@@ -300,14 +311,22 @@ namespace WorldTerrain
                         if (drop <= talus)
                             continue;
 
-                        float move = (drop - talus) * rate * 0.5f;
-                        delta[i] -= move;
-                        delta[lowest] += move;
+                        moveAmount[i] = (drop - talus) * rate * 0.5f;
+                        moveTarget[i] = lowest;
                     }
+                });
+
+                // 串行累加：顺序与原来的单循环一致，保证逐位相同
+                for (int i = 0; i < n; i++)
+                {
+                    float move = moveAmount[i];
+                    if (move == 0f)
+                        continue;
+                    delta[i] -= move;
+                    delta[moveTarget[i]] += move;
                 }
 
-                for (int i = 0; i < n; i++)
-                    map[i] += delta[i];
+                Parallelism.For(n, i => map[i] += delta[i]);
             }
         }
     }

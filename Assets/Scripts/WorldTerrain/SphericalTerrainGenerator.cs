@@ -103,7 +103,9 @@ namespace WorldTerrain
             // 想要更细就把 MaxSphereCells 调大（值越大越接近"每格点一个像素"）。
             int cellTarget = Math.Min(MaxSphereCells, Math.Max(12, w * h / 4));
             int level = Math.Min(8, SphereGrid.LevelForCellCount(cellTarget));
-            var grid = SphereGrid.Create(level);
+            // 复用已构建的网格：同一 level 的 icosphere 每次完全相同，
+            // 重建一次要 65~227 ms 且全串行（详见 SphereGrid.Get 的说明）
+            var grid = SphereGrid.Get(level);
             int n = grid.VertexCount;
 
             var height = new float[n];
@@ -111,7 +113,9 @@ namespace WorldTerrain
             var plateOf = new int[n];
 
             // ── (a) 每个格点：板块归属 + 陆壳/洋壳 + 大地形起伏 + 地壳均衡 ──
-            for (int i = 0; i < n; i++)
+            // 每个 i 只写自己的 height[i] / continental[i] / plateOf[i]，彼此无依赖，
+            // 噪声是纯函数（SeededNoise 无可变状态），因此并行与串行逐位相同。
+            Parallelism.For(n, i =>
             {
                 Vector3D pos = grid.Vertices[i];
 
@@ -150,37 +154,37 @@ namespace WorldTerrain
                 double isostasy = (cont - 0.5) * IsostasyAmplitude;
 
                 height[i] = (float)(((n1 * 2.0 - 1.0) * 2500.0) * reliefScale + isostasy);
-            }
+            });
 
             onProgress?.Invoke(0.35f);
 
             // ── (a2) 中/细尺度细节也放在球面格点上 ──
             // 关键：排水与侵蚀看到的必须是「最终地形本身」，而不是缺了细节的光滑底稿。
             // 球面数据的可靠性直接决定河谷走向与侵蚀结果是否合理。
-            for (int i = 0; i < n; i++)
+            // 同样每个 i 只写自己的 height[i]。
+            Parallelism.For(n, i =>
             {
                 Vector3D pos = grid.Vertices[i];
                 double n2 = noise.Fbm3D(pos.x * 5.0, pos.y * 5.0, pos.z * 5.0, 5, 0.5, 2.0);
                 double n3 = noise.Fbm3D(pos.x * 15.0, pos.y * 15.0, pos.z * 15.0, 4, 0.5, 2.0);
                 height[i] += (float)((n2 * 2.0 - 1.0) * 1200.0 + (n3 * 2.0 - 1.0) * 500.0);
-            }
+            });
 
             // ── (b) 板块边界影响：在球面上按角距判定，再做球面平滑 ──
             float[] boundary = ComputeBoundaryEffect(grid, plates, plateOf, continental, noise);
             grid.LaplacianSmooth(boundary, 14, 0.55f);
-            for (int i = 0; i < n; i++)
-                height[i] += boundary[i];
+            Parallelism.For(n, i => height[i] += boundary[i]);
 
             onProgress?.Invoke(0.55f);
 
             // ── (b2) 球面排水：填洼 → 汇流累积 → 按汇水量下切河谷 ──
             // 河谷沿球面真实分水岭生长，高纬不会被过度切割，也没有经度接缝。
             var wetness = new float[n];
-            for (int i = 0; i < n; i++)
+            Parallelism.For(n, i =>
             {
                 double absLat = Math.Abs(grid.Lat[i]);
                 wetness[i] = (float)ClimateModel.SeaSourceMoisture(absLat);
-            }
+            });
             // 球面排水：填洼 → 汇流累积 → 按汇水量下切河谷。
             // 排水的中间量（填洼面、流向、汇流量）随返回值一起交出去 —— 它们既是诊断依据，
             // 也是「湖泊判定该在哪一级网格上做」这个问题的实测证据：
@@ -292,7 +296,9 @@ namespace WorldTerrain
             int n = grid.VertexCount;
             var effect = new float[n];
 
-            for (int i = 0; i < n; i++)
+            // 每个 i 只写自己的 effect[i]（提前 continue 的格点保持 0），
+            // 读的是只读的 plateOf / continental / Vertices，因此并行逐位一致。
+            Parallelism.For(n, i =>
             {
                 Vector3D p = grid.Vertices[i];
                 int own = plateOf[i];
@@ -315,7 +321,7 @@ namespace WorldTerrain
                     }
                 }
                 if (other < 0)
-                    continue;
+                    return;
 
                 // gap < 0 说明「本格所属板块不是最近板块」——那是扰动边界上的正常情形，
                 // 归一成"正好在边界上"，而不是当成"离边界很远"跳过（跳过会在相邻格之间造出台阶）。
@@ -323,7 +329,7 @@ namespace WorldTerrain
                 if (gap < 0.0)
                     gap = 0.0;
                 if (gap > BoundaryReach)
-                    continue;                        // 离边界太远，不受影响
+                    return;                          // 离边界太远，不受影响
 
                 double boundary = 1.0 - gap / BoundaryReach;
 
@@ -355,7 +361,7 @@ namespace WorldTerrain
 
                 uplift *= 0.7 + 0.6 * noise.Fbm3D(p.x * 6.0, p.y * 6.0, p.z * 6.0, 3, 0.5, 2.0);
                 effect[i] = (float)uplift;
-            }
+            });
 
             return effect;
         }
@@ -375,15 +381,17 @@ namespace WorldTerrain
         /// <summary>投影后补一层高频细纹（球面网格已承载中/细尺度并参与排水与侵蚀）。</summary>
         public static void AddFineTexture(int w, int h, float[] field, SeededNoise noise)
         {
-            for (int y = 0; y < h; y++)
+            // 按行并行：每个像素只写自己的槽位
+            Parallelism.ForRows(h, y =>
             {
+                int row = y * w;
                 for (int x = 0; x < w; x++)
                 {
                     Vector3D pos = PlateTectonicsGenerator.PixelToSphere(x, y, w, h);
                     double n4 = noise.Fbm3D(pos.x * 34.0, pos.y * 34.0, pos.z * 34.0, 3, 0.5, 2.0);
-                    field[y * w + x] += (float)((n4 * 2.0 - 1.0) * 220.0);
+                    field[row + x] += (float)((n4 * 2.0 - 1.0) * 220.0);
                 }
-            }
+            });
         }
 
         private static double SmoothStep(double t)
@@ -560,15 +568,27 @@ namespace WorldTerrain
                 }
             }
 
-            // 热力侵蚀：坡降超过休止角时把物质搬到更低的邻居
+            // 热力侵蚀：坡降超过休止角时把物质搬到更低的邻居。
+            //
+            // 并行化要点：邻域扫描只读 height、可以并行，但 delta 的累加不能并行
+            // （一次搬运会写 delta[i] 和 delta[lower]，而 lower 可能是别人的槽位）。
+            // 于是拆成两趟：先在并行扫描里把「搬多少、搬到哪」记下来，
+            // 再串行按原下标顺序累加 —— 加法顺序与原来完全相同，结果逐位一致。
             var delta = new float[n];
+            var moveAmount = new float[n];
+            var moveTarget = new int[n];
+
             for (int pass = 0; pass < ThermalIterations; pass++)
             {
                 Array.Clear(delta, 0, n);
-                for (int i = 0; i < n; i++)
+
+                Parallelism.For(n, i =>
                 {
+                    moveAmount[i] = 0f;
+                    moveTarget[i] = -1;
+
                     if (height[i] <= 0f)
-                        continue;
+                        return;
 
                     int start = grid.NeighborStart[i], end = grid.NeighborStart[i + 1];
                     int lower = -1;
@@ -584,19 +604,27 @@ namespace WorldTerrain
                     }
 
                     if (lower < 0)
-                        continue;
+                        return;
 
                     float drop = height[i] - lowest;
                     if (drop * TalusSlope < 1f && drop < 250f)
-                        continue;                       // 未超过休止角
+                        return;                       // 未超过休止角
 
-                    float move = drop * ThermalRate * 0.25f;
+                    moveAmount[i] = drop * ThermalRate * 0.25f;
+                    moveTarget[i] = lower;
+                });
+
+                // 串行累加：顺序与原来的单循环一致
+                for (int i = 0; i < n; i++)
+                {
+                    float move = moveAmount[i];
+                    if (move == 0f)
+                        continue;
                     delta[i] -= move;
-                    delta[lower] += move;
+                    delta[moveTarget[i]] += move;
                 }
 
-                for (int i = 0; i < n; i++)
-                    height[i] += delta[i];
+                Parallelism.For(n, i => height[i] += delta[i]);
             }
         }
     }

@@ -93,15 +93,15 @@ namespace WorldTerrain
             }
 
             // ── 2. 最陡下降流向（用真实高度，避免填出来的平台互相指环）──
+            // 每个 i 只写自己的 receiver[i] / drop[i]，读的是 filled / height / 邻接表，
+            // 全程只读，因此并行与串行逐位相同。
             var receiver = new int[n];
             var drop = new float[n];
-            for (int i = 0; i < n; i++)
+            Parallelism.For(n, i =>
             {
                 receiver[i] = -1;
                 if (height[i] <= 0f)
-                {
-                    continue;
-                }
+                    return;
 
                 int best = -1;
                 float bestDrop = 0f;
@@ -125,7 +125,7 @@ namespace WorldTerrain
 
                 receiver[i] = best;
                 drop[i] = bestDrop > 0f ? bestDrop : 0f;
-            }
+            });
 
             // ── 3. 汇流累积：按 filled 从高到低累加 ──
             var order = new int[n];
@@ -169,18 +169,19 @@ namespace WorldTerrain
 
             // ── 4. 按汇水量下切河谷，两岸略微抬升 → 形成 V 形谷 ──
             var incision = new float[n];
-            for (int i = 0; i < n; i++)
+            Parallelism.For(n, i =>
             {
                 if (height[i] <= 0f || accum[i] < ChannelThreshold)
-                    continue;
+                    return;
 
                 double w = wetness != null && i < wetness.Length ? wetness[i] : 0.6;
                 double depth = incisionScale * Math.Sqrt(accum[i]) * (0.5 + 0.9 * w);
                 if (depth > MaxIncision)
                     depth = MaxIncision;
                 incision[i] = (float)depth;
-            }
+            });
 
+            // 这一步会把 incision[i] 散播到邻居格子，不能并行（会写别人的槽位）
             for (int i = 0; i < n; i++)
             {
                 if (incision[i] <= 0f)

@@ -260,14 +260,20 @@ namespace WorldTerrain
             double[] rowSinLat = new double[h];
             for (int y = 0; y < h; y++)
             {
-                double src = annualProfile[y];
-                for (int x = 0; x < w; x++)
-                    field[y * w + x] = (float)src;
-
                 double lat = Math.PI * 0.5 - (double)y / (h - 1) * Math.PI;
                 rowCosLat[y] = Math.Cos(lat);
                 rowSinLat[y] = Math.Sin(lat);
             }
+
+            // 逐行填充初值（每行只写自己那一行）；后面的带内推进仍是串行的，
+            // 因为下风行必须读到上风行的结果
+            Parallelism.ForRows(h, y =>
+            {
+                float src = (float)annualProfile[y];
+                int row = y * w;
+                for (int x = 0; x < w; x++)
+                    field[row + x] = src;
+            });
 
             double[] colCosLon = new double[w];
             double[] colSinLon = new double[w];

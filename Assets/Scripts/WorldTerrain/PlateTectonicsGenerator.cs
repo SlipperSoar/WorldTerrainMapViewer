@@ -86,8 +86,10 @@ namespace WorldTerrain
             int[] plateIds = new int[width * height];
             double perturbStrength = 0.12;
 
-            for (int y = 0; y < height; y++)
+            // 每行只写自己那一行的 plateIds，噪声是纯函数 → 并行逐位一致
+            Parallelism.ForRows(height, y =>
             {
+                int row = y * width;
                 for (int x = 0; x < width; x++)
                 {
                     Vector3D pos = PixelToSphere(x, y, width, height);
@@ -115,9 +117,9 @@ namespace WorldTerrain
                         }
                     }
 
-                    plateIds[y * width + x] = best;
+                    plateIds[row + x] = best;
                 }
-            }
+            });
 
             return plateIds;
         }

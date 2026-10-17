@@ -162,19 +162,29 @@ namespace WorldTerrain
 
             float[] moisture = useProvidedMoisture ? moistureField : new float[n];
             float[] jitter = new float[n];
+
+            // 最高陆地：纯 max 归约，与求和不同（max 可交换可结合、不产生舍入），
+            // 因此可以拆出来单独算，不改变结果；拆开后下面的逐像素填充就能并行了。
             float maxLandElevation = 0f;
-            for (int y = 0; y < h; y++)
+            for (int i = 0; i < n; i++)
+                if (heightField[i] > maxLandElevation)
+                    maxLandElevation = heightField[i];
+
+            // 每像素一次 Noise3D，是水文阶段的主要开销之一；每个像素只写自己的槽位
+            Parallelism.ForRows(h, y =>
             {
+                int row = y * w;
                 double absLat = Math.Abs(90.0 - (double)y / (h - 1) * 180.0);
+                double cosLat = rowCosLat[y];
+                double sinLat = rowSinLat[y];
+
                 for (int x = 0; x < w; x++)
                 {
-                    int i = y * w + x;
+                    int i = row + x;
                     float elev = heightField[i];
-                    if (elev > maxLandElevation)
-                        maxLandElevation = elev;
 
-                    var pos = new Vector3D(rowCosLat[y] * colCosLon[x], rowSinLat[y],
-                                           rowCosLat[y] * colSinLon[x]);
+                    var pos = new Vector3D(cosLat * colCosLon[x], sinLat,
+                                           cosLat * colSinLon[x]);
                     if (!useProvidedMoisture)
                         moisture[i] = (float)ClimateModel.MoistureFromBase(
                             rowMoistureBase[y], seaDist[i], noise, pos);
@@ -187,17 +197,19 @@ namespace WorldTerrain
                                   * 2.0 * RoutingJitterMeters)
                         : 0f;
                 }
-            }
+            });
 
             // 本地径流总量 → 河网阈值（地图越大、陆地越多，河道阈值越高）
+            // 这是**求和**，浮点加法不可交换，必须保持原来的串行累加顺序才能逐位一致
             float totalRunoff = 0f;
             for (int y = 0; y < h; y++)
             {
+                double cosLat = rowCosLat[y];
                 for (int x = 0; x < w; x++)
                 {
                     int i = y * w + x;
                     if (heightField[i] > 0f)
-                        totalRunoff += (float)rowCosLat[y]
+                        totalRunoff += (float)cosLat
                             * OrographicWeight(heightField[i], maxLandElevation)
                             * RunoffFactor(moisture[i]);
                 }

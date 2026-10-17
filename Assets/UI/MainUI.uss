@@ -176,6 +176,43 @@
     -unity-text-align: middle-right;
 }
 
+/* ── 生成分辨率 ── */
+#resolution-row {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 2px;
+}
+
+#resolution-row > Label {
+    color: #888;
+    font-size: 12px;
+    width: 60px;
+}
+
+#resolution-slider {
+    flex-grow: 1;
+    margin-right: 4px;
+}
+
+#resolution-value {
+    color: #4ECDC4;
+    font-size: 12px;
+    width: 76px;
+    -unity-text-align: middle-right;
+}
+
+/* 内存估算提示：默认低调；占用可能过大时由代码加上 .resolution-hint-warn */
+#resolution-hint {
+    color: #666;
+    font-size: 11px;
+    margin-bottom: 8px;
+    padding-left: 60px;
+}
+
+#resolution-hint.resolution-hint-warn {
+    color: #E8A33D;
+}
+
 #generate-button {
     background-color: rgba(78, 205, 196, 0.3);
     border-width: 1px;

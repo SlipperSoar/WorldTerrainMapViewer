@@ -17,6 +17,8 @@
 - [10. 性能实测](#10-性能实测)
 - [11. 并行加速](#11-并行加速)
 - [12. 管线步骤单元测试](#12-管线步骤单元测试)
+- [13. 生成分辨率档位](#13-生成分辨率档位)
+- [14. 内存占用排查](#14-内存占用排查)
 
 ---
 
@@ -81,13 +83,18 @@ dotnet run -c Release
 - **`orbitcheck.csproj`** — 用最小四元数实现复现**新旧两套环绕算法**，逐步模拟鼠标拖拽，
   比较俯仰跟随误差、单帧突变（二阶差分）、横滚角与限位行为，并验证相机 `forward`
   是否精确指向球心。用于量化「旧写法为什么会跳变」（见[第 9 节](#9-环绕相机视角跳变)）。
-- **`orbitstate.csproj`** — 编译**真实**的 `CameraOrbitState.cs`，对它做状态机单元测试
-  （见[第 12.3 节](#123-相机状态机的单元测试)）。
+- **`statecheck/statecheck.csproj`** — 编译**真实**的 `CameraOrbitState.cs`，对它做状态机单元测试
+  （见[第 12.3 节](#123-相机状态机的单元测试)）。单独放在子目录里：两个工程共用同一层 `obj/`
+  会互相覆盖入口点，导致跑出来的其实是另一个程序。
 
 ```
 cd dsh_preview/icecheck/orbitcheck
-dotnet run -c Release                                   # 新旧算法对比
-dotnet build orbitstate.csproj -c Release && ./bin/Release/net9.0/orbitstate.exe   # 状态机测试
+dotnet build orbitcheck.csproj -c Release
+./bin/Release/net9.0/orbitcheck.exe                     # 新旧算法对比
+
+cd statecheck
+dotnet build statecheck.csproj -c Release
+./bin/Release/net9.0/orbitstate.exe                     # 状态机单元测试
 ```
 
 ### 1.5 步骤单元测试台
@@ -584,15 +591,19 @@ dotnet run -c Release
 
 ### 12.3 相机状态机的单元测试
 
-工程在 `dsh_preview/icecheck/orbitcheck/orbitstate.csproj`。它编译**真实的**
-`CameraOrbitState.cs`，配合 `tools/UnityMathStub.cs`（最小 Vector3 / Quaternion / Mathf 替身），
+工程在 `dsh_preview/icecheck/orbitcheck/statecheck/`。它编译**真实的**
+`CameraOrbitState.cs`，配合 `../tools/UnityMathStub.cs`（最小 Vector3 / Quaternion / Mathf 替身），
 因此测的不是验证台里另写的一份算法。
 
 ```
-cd dsh_preview/icecheck/orbitcheck
-dotnet build orbitstate.csproj -c Release
+cd dsh_preview/icecheck/orbitcheck/statecheck
+dotnet build statecheck.csproj -c Release
 ./bin/Release/net9.0/orbitstate.exe
 ```
+
+> 单独放子目录是必须的：同一层目录下的两个 csproj 会共用 `obj/`，
+> 后构建的那个会把入口点覆盖到先前的产物上 —— 实测出现过 `orbitstate.exe`
+> 里跑的是 `orbitcheck` 的测试。这类「跑出来的不是你以为的程序」的错误很难察觉。
 
 | 用例 | 断言 |
 |---|---|
@@ -608,6 +619,294 @@ dotnet build orbitstate.csproj -c Release
 
 旧实现里这些边界情况是隐性耦合的（俯仰轴随 yaw 漂移、到极点整帧丢弃），
 只能靠复现去猜；现在每条转换都有名字、都能单独断言。
+
+---
+
+## 13. 生成分辨率档位
+
+### 13.1 档位设计
+
+对外只说**宽度**，高度恒为一半（等距圆柱 2:1）。4 个档位是**离散翻倍**的：
+
+| 档位 | 实际尺寸 | 单元格数 | 球面网格级别 |
+|---|---|---|---|
+| 1024 | 1024×512 | 524,288 | level 7（16.4 万格点） |
+| **2048（默认）** | 2048×1024 | 2,097,152 | level 8（65.5 万格点） |
+| 4096 | 4096×2048 | 8,388,608 | level 8 |
+| 8192 | 8192×4096 | 33,554,432 | level 8 |
+
+为什么必须离散而不是任意值：球面网格按 4 的幂细分（`LevelForCellCount`），
+`cellTarget = w·h/4` 封顶 70 万。任意宽度会让「球面格点 / 像素」的粒度比在档位之间
+剧烈抖动；翻倍则每档的粒度比变化可预期。传入非档位值会被 `MapResolution.Snap` 吸附到最近档位。
+
+### 13.2 单元测试
+
+工程在 `dsh_preview/icecheck/stepcheck/rescheck.csproj`（编译真实的 `MapResolution.cs`）：
+
+```
+cd dsh_preview/icecheck/stepcheck
+dotnet build rescheck.csproj -c Release
+./bin/Release/net9.0/resolutioncheck.exe          # 只跑逻辑测试
+./bin/Release/net9.0/resolutioncheck.exe --bench-all   # 额外实测 4 个档位
+```
+
+| 用例组 | 断言 |
+|---|---|
+| 档位定义 | 4 档、值为 1024/2048/4096/8192、默认 2048、最低/最高档正确 |
+| 吸附 | 档位值保持不变；越界（0 / 负数 / 99999）夹到端点；档位之间吸附到**最近**（1500→1024、1600→2048、3500→4096） |
+| 下标往返 | `IndexOf(WidthAt(i)) == i`；下标越界夹到端点 |
+| 尺寸换算 | 高度恒为宽度一半；2048 → 2,097,152 格；8192 → 33,554,432 格 |
+| 标签 | `2048×1024`；非档位值给出吸附后的标签 |
+| 内存估算 | 随分辨率单调递增、每翻一倍约 4 倍、8192 估算 > 3 GB |
+
+### 13.3 各档位实测
+
+本机 24 逻辑核，含全部 12 个步骤，不含 PNG 编码与落盘：
+
+| 档位 | 耗时 | 托管内存增量 | 估算值 |
+|---|---|---|---|
+| 1024×512 | 1.5 s | 0.09 GB | 约 84 MB |
+| 2048×1024 | 4.2 s | 0.29 GB | 约 335 MB |
+| 4096×2048 | 7.8 s | 1.04 GB | 约 1.3 GB |
+| 8192×4096 | **30.8 s** | **3.57 GB** | 约 5.2 GB |
+
+两点值得记下来：
+
+- **耗时不是线性增长**。1024 → 2048 慢近 3 倍（球面网格从 level 7 升到 level 8，
+  球面那部分整体变重）；2048 → 4096 只慢约 1.9 倍（球面级别不再变，只有像素级步骤变重）；
+  4096 → 8192 约 4 倍（纯像素级，格数 ×4）。
+- **内存估算偏保守**（8192 估 5.2 GB、实测 3.57 GB）。这是有意的：估算只用于「要不要提醒用户」，
+  宁可高估。实测值来自 `GC.GetTotalMemory` 的前后差值，是**托管堆**增量，
+  不含 Unity 自身与贴图开销。
+
+### 13.4 分辨率会改变地形
+
+这条容易踩坑，单独记一笔：**同一个种子在不同档位下生成的地形不同**。
+
+原因：球面细分级别由像素总数决定。1024 档落到 level 7，2048 及以上落到 level 8，
+球面格点从 16.4 万变成 65.5 万 —— 大地形、排水、侵蚀全都在这个网格上做，
+结果自然不同。4096 与 8192 虽然同为 level 8，但像素网格更密，投影后的细尺度侵蚀与水文仍会变化。
+
+实测（`resolutioncheck.exe --compare`，seed 20260801，12×24 经纬度网格采样）：
+
+| 指标 | 结果 |
+|---|---|
+| 采样点数 | 288 |
+| 两档高度**完全相同**的点 | **0 个（0%）** |
+| 最大高差 | **2107.6 m** |
+| 1024 档最高陆地 | 3397 m |
+| 2048 档最高陆地 | 3391 m |
+
+也就是说两档的「最高陆地」看着几乎一样，但逐格地形完全不同 —— 只看统计量会被误导。
+
+所以「复现他人的地图」需要四项：**种子 + 水面占比 + 地轴倾角 + 分辨率档位**。
+README 的「自行生成方式」里已经写明了这一点。
+
+---
+
+## 14. 内存占用排查
+
+### 14.1 现象
+
+按 1024 → 4096 → 8192 依次生成后，引擎占用约 6 GB；**切换回小图完全不回落**；
+重启引擎后回到 1 GB。问题：是「停止运行后没释放」还是「真泄漏」？
+
+结论：**两者都有**。一半是真实的持有/分配问题（已修），一半是 Unity 托管堆不把页还给操作系统
+（运行时行为，不是泄漏）。
+
+### 14.2 逐步骤剖析方法
+
+用 `GenerationPipeline.RunStep` 一步一步跑，每步之后量 `GC.GetTotalMemory(false)`：
+
+```
+# 关掉步骤间 GC
+resolutioncheck.exe --mem 8192
+
+# 打开步骤间 GC（与实际大图生成一致）
+resolutioncheck.exe --mem 8192 gc
+```
+
+> `GetTotalMemory(false)` **包含尚未回收的垃圾**，所以它反映的是「分配压力 / 堆高水位」，
+> 而不是「活对象大小」。对排查这个现象正合适 —— 高水位才是进程占用高的直接原因。
+
+### 14.3 剖析结果（8192×4096）
+
+| 步骤 | 关 GC 后累计 | 开 GC 后累计 | 开 GC + Color32 |
+|---|---|---|---|
+| 板块 | 128 MB | 128 MB | 128 MB |
+| 地形高度场 | 720 MB | 452 MB | 452 MB |
+| 气候场 | 849 MB | 580 MB | 580 MB |
+| 侵蚀 | 1092 MB | 580 MB | 580 MB |
+| 海平面标定 | 1092 MB | 580 MB | 580 MB |
+| 气候反馈 | 708 MB | 580 MB | 580 MB |
+| 水文 | 2404 MB | 1252 MB | 1252 MB |
+| 地形分类 | 2916 MB | 1380 MB | 1380 MB |
+| 板块分界图 | 1892 MB | 1892 MB | 1508 MB |
+| 高度图 | 2404 MB | 2404 MB | 1636 MB |
+| 地形图 | 2916 MB | 2916 MB | 1764 MB |
+| 人文 | 4291 MB | 2916 MB | 1764 MB |
+| **全程峰值** | **4291 MB** | **2916 MB** | **1764 MB** |
+
+```
+Color[]   = 512 MB/张（16 B/px）      Color32[] = 128 MB/张（4 B/px）
+```
+
+### 14.4 三项改动
+
+**① 换图时销毁旧贴图**
+
+`SetEarthSurface` / `SetEarthHeightMap` / `SetPlateOverlay` 原来只把新贴图塞进材质，
+**从不销毁旧的**。8192 档每张 RGBA32 是 128 MB、CPU 与 GPU 各一份，三层约 768 MB，
+每切一次地图就永久多留一份。
+
+修法：`EarthManager` 记录自己持有的三张贴图，替换时销毁前一张。
+
+**② 生成后释放中间结果**
+
+`WorldGenResult` 一直被 `generationResult` 字段持有，只有下次生成才开始才置空。
+8192 档其中六个数组合计 **1920 MB**（`heightField`/`plateIds`/`terrainTypes` 各 128 MB，
+三张 Color 各 512 MB），而彩色数据早已拷进贴图、也编码成 PNG 写盘了。
+
+修法：主线程用完结果后 `ReleaseGenerationResult()`，成功/失败/保存失败三条路径都清。
+
+> 注意：这两项只解除**引用**。已经分配的堆页不会因此还给操作系统，
+> 所以「切到小图不回落」的现象不会因为这两项而消失 —— 它们是「不再继续增长」，不是「降下来」。
+
+**③ 削峰值（真正能降低占用的那项）**
+
+- **彩色图改用 `Color32`**（4 B/px）：三张图 1536 MB → 384 MB
+- **大图在步骤之间强制 GC**（`TerrainGenerator.AggressiveGcCellThreshold = 4M` 格，即 4096 档起）：
+  各步骤的临时数组用完即弃，但 .NET 不主动回收，会和后续步骤的分配叠加
+- **显示贴图 `Apply(false, true)`**：释放 CPU 侧像素副本，每张 8192 贴图省 128 MB
+
+### 14.5 量化规则验证（为什么换 `Color32` 不改变像素）
+
+换类型引入了「浮点 → 8 位」的量化，必须确认与 Unity 自己的转换一致。
+手上正好有一张**旧代码路径生成的图**（`gen_rnd_20261016_204924.png`，其 `_meta.json`
+记了 seed / 水面占比 / 倾角），可以复现同一张地图再对比：
+
+```
+resolutioncheck.exe --colordump      # 复现该图，导出颜色
+python tools/check_color_quantization.py
+```
+
+| 候选量化方式 | 与旧 PNG 不一致的通道 | 差值分布 |
+|---|---|---|
+| **四舍五入 + 上下翻转** | **1.800%（其中 \|Δ\|≤1 占 99.7%）** | 98.2% 为 0、1.5% 为 ±1、0.26% 为大差 |
+| 截断 + 上下翻转 | 40.441% | 40.1% 集中在 ±1 ← 典型的「规则错」特征 |
+| 四舍五入 + 不翻转 | 59.529% | 方向假设错误 |
+
+结论：Unity 用**四舍五入**。剩余 0.26% 的大差是**整块区域差异** —— 那张图是更早的地形算法
+生成的，水系/海岸线有偏移，与量化无关（量化错会满屏 ±1，而不是局部大差）。
+
+改成 `Color32` 后重跑，diff 统计与原 float+round **完全相同**（98.200% / 1.535%），
+说明两条路径量化一致 → **像素没有任何改变**。
+
+### 14.6 结果
+
+| 档位 | 改前内存 | 改后内存 | 改前耗时 | 改后耗时 |
+|---|---|---|---|---|
+| 1024 | 0.09 GB | 0.06 GB | 1.5 s | 1.4 s |
+| 2048 | 0.29 GB | 0.27 GB | 4.2 s | 4.1 s |
+| 4096 | 1.04 GB | **0.41 GB** | 7.8 s | 8.2 s |
+| 8192 | 3.57 GB | **1.66 GB** | 30.8 s | 32.2 s |
+
+峰值（8192）：**4291 MB → 1764 MB（−59%）**。代价是时间增加约 5%（步骤间 GC）。
+
+### 14.7 剩下的部分是运行时行为
+
+即使峰值降了一半，进程占用仍会停在高水位、且切到小图不回落。原因：
+
+- .NET / Mono 的 GC 回收内存后，**不把页还给操作系统**，只是标记为可复用
+- 大数组（512 MB 级的 `Color[]`、水文掩膜）走大对象堆，碎片化后更难回收
+- GPU 侧显存由图形驱动管理，进程退出才完全释放
+
+所以「重启引擎后从 6 GB 掉到 1 GB」是正常的。判断是否真有泄漏，
+看的是「连续做同一件事内存是否**单调上涨**」；涨到某个水位后走平就正常。
+
+### 14.8 复现命令
+
+```
+cd dsh_preview/icecheck/stepcheck
+dotnet build rescheck.csproj -c Release
+
+# 逐步骤内存（关 / 开步骤间 GC）
+./bin/Release/net9.0/resolutioncheck.exe --mem 8192
+./bin/Release/net9.0/resolutioncheck.exe --mem 8192 gc
+
+# 各档位耗时与内存实测
+./bin/Release/net9.0/resolutioncheck.exe --bench-all
+
+# 量化规则验证
+./bin/Release/net9.0/resolutioncheck.exe --colordump
+python ../tools/check_color_quantization.py
+```
+
+### 14.9 「每轮涨 300 MB」——已解决
+
+上面三项改动之后实测：每轮（依次生成 1024 / 4096 / 8192）引擎占用**仍会涨约 300 MB**，
+三轮就是 900 MB。这是**单调上涨**，与「高水位」不同，说明确实还有东西没释放。
+
+**根因**：`Object.Destroy(texture)` 只是打销毁标记，贴图的**原生内存与显存要等一次资源回收**
+才真正归零。而当时代码里**没有任何地方调用 `Resources.UnloadUnusedAssets()`**。
+每轮生成都会换掉三张 8192 贴图：
+
+```
+3 × 8192×4096×4 字节 = 384 MB   ← 与观察到的「约 300 MB/轮」正好吻合
+```
+
+所以是**原生资源未回收**，不是托管堆泄漏 —— 这也解释了为什么之前修托管侧
+（销毁贴图引用、清 `generationResult`）完全没让占用下降。
+
+**修复**：`WorldTerrainGenerator.GenerateWorldCoroutine` 末尾加两步收尾
+
+1. `Resources.UnloadUnusedAssets()` —— 让 Unity 真正回收已销毁但未被引用的原生资源
+2. `GenerationPipeline.CollectNow()` —— 再压一次托管堆，把主线程这段（建贴图、编码 PNG）
+   产生的大数组也收掉
+
+**验证**（连续两轮，同阶段对比）：
+
+| 阶段（卸载未用资源后） | 第 1 轮 | 第 2 轮 | 差 |
+|---|---|---|---|
+| 8192 · 托管堆 | 132 MB | 136 MB | +4 MB |
+| 8192 · Unity 已用 | 577 MB | 580 MB | +3 MB |
+| 8192 · 保留 | 888 MB | 888 MB | 0 |
+| 8192 · 显存 | 662 MB | 663 MB | +1 MB |
+| 4096 · 托管堆 | 130 MB | 135 MB | +5 MB |
+| 4096 · 显存 | 374 MB | 375 MB | +1 MB |
+
+同阶段两轮差 1~5 MB，属噪声级。另外 8192 生成完「释放结果后」托管堆是 1978 MB，
+收尾后降到 132 MB —— **1.8 GB 被完整回收**，说明这台机器的 Mono 会正常归还内存。
+
+### 14.10 如果以后还要查内存
+
+诊断用的 `[内存]` 日志是临时的，定位完已从代码里移除（避免每次生成刷两行）。
+需要再查时，在 `WorldTerrainGenerator.GenerateWorldCoroutine` 里临时打印这四个数：
+
+```
+托管堆            GC.GetTotalMemory(false)
+Unity 已用        Profiler.GetTotalAllocatedMemoryLong()
+Unity 保留        Profiler.GetTotalReservedMemoryLong()
+显存              Profiler.GetAllocatedMemoryForGraphicsDriver()
+```
+
+**连续两轮**只看同一行的变化：
+
+| 现象 | 说明 | 处理方向 |
+|---|---|---|
+| 托管堆持续上涨 | C# 侧有引用没断，或大对象堆碎片化 | 找持有者 / 削分配 |
+| Unity 已用持续上涨 | 贴图、网格等原生资源没销毁 | 查 `new Texture2D` / `CreatePrimitive` 的销毁路径 |
+| 显存持续上涨 | 换贴图时旧的没真正释放 | `Set*` 是否销毁旧贴图、`UnloadUnusedAssets` 是否生效 |
+| 只有「保留」上涨、已用不涨 | 分配器预留的空闲页，**不是泄漏** | 可忽略 |
+
+> Unity 用的 Mono 不支持 `LargeObjectHeapCompactionMode`（`#if NET5_0_OR_GREATER` 在 Unity 下不成立），
+> 所以真遇到大对象堆碎片化，只能靠「减少大数组分配 / 复用缓冲」来根治。
+
+### 14.11 还能再省的地方（未做）
+
+高度图与板块图只在 `地形凹凸` / `断层带` 开关打开时才需要，可以改成**按需解码**：
+生成时只解码彩色地形图，其余两张等开关第一次打开再从磁盘读。8192 档这两张各 128 MB，
+合计可再省 256 MB。代价是开关首次切换会有几十毫秒的解码延迟。
 
 ---
 

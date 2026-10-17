@@ -1,5 +1,3 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -23,8 +21,6 @@ public class CameraController : MonoBehaviour
 {
     #region Properties
 
-    [SerializeField] private SunLightController sunLightController;
-
     [SerializeField] private Transform target;
     [SerializeField] private float distance = 10f;
     [SerializeField] private float minDistance = 2f;
@@ -45,8 +41,6 @@ public class CameraController : MonoBehaviour
     /// <summary>角度状态机（唯一真值）。</summary>
     private readonly CameraOrbitState orbit = new CameraOrbitState();
 
-    private Vector3 offset;
-
     /// <summary>当前状态（Idle / Dragging / Transitioning），供 UI 与测试读取。</summary>
     public CameraOrbitState.Phase OrbitPhase => orbit.State;
 
@@ -62,7 +56,7 @@ public class CameraController : MonoBehaviour
             return;
         }
 
-        offset = transform.position - target.position;
+        Vector3 offset = transform.position - target.position;
 
         orbit.SetPitchLimits(minY, maxY);
         orbit.TransitionSpeed = transitionSpeed;

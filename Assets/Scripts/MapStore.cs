@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 using WorldTerrain;
@@ -175,31 +174,6 @@ public static class MapStore
         return data;
     }
 
-    /// <summary>
-    /// 列出 StreamingAssets 下所有可作为地图的条目（排除 _height / _plates 等配套文件）。
-    /// </summary>
-    public static List<string> ListMapNames()
-    {
-        var names = new List<string>();
-        string root = Application.streamingAssetsPath;
-        if (!Directory.Exists(root))
-            return names;
-
-        foreach (string file in Directory.GetFiles(root, "*.png"))
-        {
-            string name = Path.GetFileNameWithoutExtension(file);
-            if (name.EndsWith("_height", StringComparison.OrdinalIgnoreCase) ||
-                name.EndsWith("_plates", StringComparison.OrdinalIgnoreCase) ||
-                name.EndsWith("_lines", StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            names.Add(name);
-        }
-
-        names.Sort(StringComparer.Ordinal);
-        return names;
-    }
-
     // ── 内部 ──
 
     private static byte[] ReadBytesOrNull(string path)
@@ -215,7 +189,7 @@ public static class MapStore
         }
     }
 
-    private static byte[] EncodePng(Color[] pixels, int width, int height, bool linear)
+    private static byte[] EncodePng(Color32[] pixels, int width, int height, bool linear)
     {
         if (pixels == null || width <= 0 || height <= 0)
             return null;
@@ -223,7 +197,8 @@ public static class MapStore
         var tex = new Texture2D(width, height, TextureFormat.RGBA32, false, linear);
         try
         {
-            tex.SetPixels(pixels);
+            // SetPixels32 直接收 8 位数据，不需要 Unity 再做一次浮点→字节转换
+            tex.SetPixels32(pixels);
             tex.Apply();
             return tex.EncodeToPNG();
         }

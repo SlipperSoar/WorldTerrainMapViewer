@@ -41,9 +41,6 @@ namespace WorldTerrain
         /// <summary>像素总数。</summary>
         public int CellCount => Config.width * Config.height;
 
-        /// <summary>逐格数组长度（与 <see cref="CellCount"/> 相同，便于可读性）。</summary>
-        public int Length => Config.width * Config.height;
-
         // ── 阶段产物 ──
 
         /// <summary>[板块] 构造出的板块列表。</summary>
@@ -71,13 +68,13 @@ namespace WorldTerrain
         public TerrainType[] TerrainTypes;
 
         /// <summary>[渲染] 灰度高度图颜色。</summary>
-        public Color[] HeightColors;
+        public Color32[] HeightColors;
 
         /// <summary>[渲染] 彩色地形图颜色。</summary>
-        public Color[] TerrainColors;
+        public Color32[] TerrainColors;
 
         /// <summary>[渲染] 板块分界叠加图颜色（含透明度）。</summary>
-        public Color[] PlateOverlayColors;
+        public Color32[] PlateOverlayColors;
 
         /// <summary>[人文] 聚落、国家、交通线与自然地名。</summary>
         public HumanGeographyData Human;

@@ -26,6 +26,30 @@ public class EarthManager : MonoBehaviour
     /// <summary>云层预览（气候数据驱动）；可挂在本物体或子物体上。</summary>
     private CloudLayer _cloudLayer;
 
+    // ── 星球三层贴图的所有权 ──
+    //
+    // 这几个字段记录「当前挂在材质上的贴图是谁」。换图时必须把上一张 Destroy 掉：
+    // 8192 档的 RGBA32 贴图每张 8192×4096×4 = 134 MB，且 CPU 与 GPU 各占一份，
+    // 三层就是约 800 MB —— 不销毁的话每切一次地图就永久多留一份。
+    private Texture2D _earthSurfaceTexture;
+    private Texture2D _earthHeightTexture;
+    private Texture2D _plateOverlayTexture;
+
+    /// <summary>
+    /// 把 <paramref name="slot"/> 换成 <paramref name="next"/>，并销毁原来那张（若不同且非空）。
+    /// 传入 null 表示清空。
+    /// </summary>
+    private static void ReplaceOwnedTexture(ref Texture2D slot, Texture2D next)
+    {
+        if (ReferenceEquals(slot, next))
+            return;
+
+        if (slot != null)
+            Destroy(slot);
+
+        slot = next;
+    }
+
     // Draw mode
     private bool _drawMode = false;
     private List<GameObject> _lineObjects = new List<GameObject>();
@@ -162,6 +186,10 @@ public class EarthManager : MonoBehaviour
             Material material = earthRenderer.material;
             material.SetTexture("_MainTex", texture);
 
+            // 换图时销毁上一张：8192 档的 RGBA32 贴图每张 134 MB，
+            // 不销毁的话每切一次地图就多留一份（CPU + GPU 各一份）。
+            ReplaceOwnedTexture(ref _earthSurfaceTexture, texture);
+
             Debug.Log($"Successfully loaded texture: {texture}");
             Debug.Log($"Texture size: {texture.width}x{texture.height}");
         }
@@ -179,6 +207,8 @@ public class EarthManager : MonoBehaviour
             material.SetTexture("_HeightTex", heightMap);
             material.SetFloat("_HeightScale", heightScale);
 
+            ReplaceOwnedTexture(ref _earthHeightTexture, heightMap);
+
             Debug.Log($"Successfully loaded height map: {heightMap}");
         }
         else
@@ -194,6 +224,8 @@ public class EarthManager : MonoBehaviour
             Material material = earthRenderer.material;
             material.SetTexture("_HeightTex", null);
             material.SetFloat("_HeightScale", 0f);
+
+            ReplaceOwnedTexture(ref _earthHeightTexture, null);
         }
     }
 
@@ -206,6 +238,9 @@ public class EarthManager : MonoBehaviour
         {
             _plateOverlayRenderer.material.SetTexture("_MainTex", plateTexture);
             _plateOverlayObject.SetActive(true);
+
+            ReplaceOwnedTexture(ref _plateOverlayTexture, plateTexture);
+
             Debug.Log("Applied plate overlay texture to overlay sphere");
         }
     }

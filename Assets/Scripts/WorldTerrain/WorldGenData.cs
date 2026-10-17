@@ -157,9 +157,9 @@ namespace WorldTerrain
         public float[] heightField;
         public int[] plateIds;
         public TerrainType[] terrainTypes;
-        public Color[] heightColors;
-        public Color[] terrainColors;
-        public Color[] plateOverlayColors;
+        public Color32[] heightColors;
+        public Color32[] terrainColors;
+        public Color32[] plateOverlayColors;
 
         /// <summary>本次生成使用的地图属性：地轴倾角（度）。</summary>
         public float axialTilt;

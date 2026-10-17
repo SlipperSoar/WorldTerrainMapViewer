@@ -23,6 +23,12 @@
                     <ui:Slider name="tilt-slider" low-value="0" high-value="90" value="23.5" style="width: 167px;" />
                     <ui:Label name="tilt-value" text="23.5°" />
                 </ui:VisualElement>
+                <ui:VisualElement name="resolution-row">
+                    <ui:Label text="分辨率" />
+                    <ui:Slider name="resolution-slider" low-value="0" high-value="3" value="1" style="width: 167px;" />
+                    <ui:Label name="resolution-value" text="2048×1024" />
+                </ui:VisualElement>
+                <ui:Label name="resolution-hint" text="内存 约 0.4 GB" />
                 <ui:Button name="generate-button" text="生成新世界" />
                 <ui:Label name="gen-progress-label" />
             </ui:VisualElement>

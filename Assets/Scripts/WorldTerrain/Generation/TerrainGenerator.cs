@@ -25,7 +25,8 @@ namespace WorldTerrain
             GenerationPipeline pipeline = null)
         {
             var ctx = new TerrainContext(config);
-            (pipeline ?? GenerationPipeline.CreateDefault()).Run(ctx, onProgress);
+            GenerationPipeline p = pipeline ?? CreateDefaultPipeline(config);
+            p.Run(ctx, onProgress);
             return ctx;
         }
 
@@ -36,9 +37,26 @@ namespace WorldTerrain
             GenerationPipeline pipeline = null)
         {
             var ctx = new TerrainContext(config);
-            (pipeline ?? GenerationPipeline.CreateDefault())
-                .RunSubset(ctx, stepNames, onProgress);
+            GenerationPipeline p = pipeline ?? CreateDefaultPipeline(config);
+            p.RunSubset(ctx, stepNames, onProgress);
             return ctx;
+        }
+
+        /// <summary>超过这个单元格数就启用步骤间 GC（见 <see cref="GenerationPipeline.CollectGarbageBetweenSteps"/>）。</summary>
+        public const long AggressiveGcCellThreshold = 4_000_000;   // ≈ 2048×2048，即 4096 档及以上
+
+        /// <summary>
+        /// 按分辨率选择是否在步骤间强制 GC。
+        ///
+        /// 大图（4096 及以上）各步骤的临时数组加起来有好几个 GB，不及时回收会和后续步骤叠加，
+        /// 把堆高水位推上去 —— 而高水位不会还回来。小图则不值得付 GC 的开销。
+        /// </summary>
+        public static GenerationPipeline CreateDefaultPipeline(WorldGenConfig config)
+        {
+            GenerationPipeline pipeline = GenerationPipeline.CreateDefault();
+            pipeline.CollectGarbageBetweenSteps =
+                (long)config.width * config.height >= AggressiveGcCellThreshold;
+            return pipeline;
         }
     }
 }

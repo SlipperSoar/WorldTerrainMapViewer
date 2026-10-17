@@ -141,13 +141,6 @@ public sealed class CameraOrbitState
         State = Phase.Transitioning;
     }
 
-    /// <summary>取消过渡，停在当前角度。</summary>
-    public void CancelTransition()
-    {
-        if (State == Phase.Transitioning)
-            State = Phase.Idle;
-    }
-
     // ── 每帧推进 ──
 
     /// <summary>

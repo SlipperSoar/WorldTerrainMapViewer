@@ -1,6 +1,5 @@
 using System;
 using System.Collections;
-using System.IO;
 using UnityEngine;
 using WorldTerrain;
 
@@ -15,7 +14,12 @@ public class WorldTerrainGenerator : MonoBehaviour
 
     public static WorldTerrainGenerator Instance { get; private set; }
 
-    [SerializeField] private int defaultHeight = 1024;
+    /// <summary>
+    /// 默认生成宽度（像素）。对外只说宽度，高度恒为一半：2048 → 2048×1024。
+    /// 可选档位见 <see cref="MapResolution"/>。
+    /// </summary>
+    [SerializeField, Tooltip("默认生成宽度（像素）；高度恒为一半。可选 1024/2048/4096/8192")]
+    private int defaultWidth = MapResolution.DefaultWidth;
 
     [Range(0.1f, 0.9f)]
     [SerializeField, Tooltip("水面占比（0.1=10%海洋 ~ 0.9=90%海洋）")]
@@ -54,14 +58,16 @@ public class WorldTerrainGenerator : MonoBehaviour
     #region Public API
 
     /// <summary>
-    /// Start generating a new world terrain map.
-    /// Call from UI or other scripts.
+    /// 开始生成一张新地图。
     /// </summary>
-    /// <param name="seed">Random seed (0 = system time)</param>
-    /// <param name="height">Map height in pixels (0 = use defaultHeight)</param>
-    /// <param name="waterCoverage">Fraction of surface that should be ocean (0-1, default 0.5)</param>
-    /// <param name="axialTilt">地轴倾角（0-90 度），地图属性；&lt;0 时使用当前默认值</param>
-    public void GenerateWorld(int seed, int height = 0, float waterCoverage = -1f, float axialTilt = -1f)
+    /// <param name="seed">随机种子（0 = 用系统时间）</param>
+    /// <param name="width">
+    /// 地图**宽度**（像素），高度恒为一半。0 = 用默认宽度。
+    /// 会吸附到 <see cref="MapResolution.Widths"/> 的最近档位（1024/2048/4096/8192）。
+    /// </param>
+    /// <param name="waterCoverage">水面占比（0-1，&lt;0 用当前默认值）</param>
+    /// <param name="axialTilt">地轴倾角（0-90 度，&lt;0 用当前默认值）</param>
+    public void GenerateWorld(int seed, int width = 0, float waterCoverage = -1f, float axialTilt = -1f)
     {
         if (isGenerating)
         {
@@ -69,8 +75,13 @@ public class WorldTerrainGenerator : MonoBehaviour
             return;
         }
 
-        if (height <= 0)
-            height = defaultHeight;
+        if (width <= 0)
+            width = defaultWidth;
+
+        // 只允许离散档位：任意值都吸附到最近的 1024/2048/4096/8192
+        int snapped = MapResolution.Snap(width);
+        if (snapped != width)
+            Debug.Log($"生成宽度 {width} 不在可选档位内，已吸附到 {snapped}");
 
         if (waterCoverage < 0f)
             waterCoverage = this.waterCoverage;
@@ -79,8 +90,11 @@ public class WorldTerrainGenerator : MonoBehaviour
             axialTilt = this.axialTilt;
         axialTilt = MapMetaData.ClampAxialTilt(axialTilt);
 
-        StartCoroutine(GenerateWorldCoroutine(seed, height, waterCoverage, axialTilt));
+        StartCoroutine(GenerateWorldCoroutine(seed, snapped, waterCoverage, axialTilt));
     }
+
+    /// <summary>当前默认生成宽度（像素）。</summary>
+    public int DefaultWidth => MapResolution.Snap(defaultWidth);
 
     public bool IsGenerating => isGenerating;
 
@@ -88,9 +102,9 @@ public class WorldTerrainGenerator : MonoBehaviour
 
     #region Private
 
-    private IEnumerator GenerateWorldCoroutine(int seed, int mapHeight, float waterCoverage, float axialTilt)
+    private IEnumerator GenerateWorldCoroutine(int seed, int mapWidth, float waterCoverage, float axialTilt)
     {
-        int mapWidth = mapHeight * 2;
+        int mapHeight = MapResolution.HeightFor(mapWidth);
         var config = new WorldGenConfig
         {
             seed = seed,
@@ -131,6 +145,7 @@ public class WorldTerrainGenerator : MonoBehaviour
         {
             Debug.LogError($"World generation failed: {generationError}");
             onError?.Invoke(generationError);
+            ReleaseGenerationResult();          // 失败也别把大数组留着
             yield break;
         }
 
@@ -158,6 +173,7 @@ public class WorldTerrainGenerator : MonoBehaviour
             string error = $"保存地图失败（{baseName}）";
             Debug.LogError(error);
             onError?.Invoke(error);
+            ReleaseGenerationResult();
             yield break;
         }
 
@@ -184,17 +200,47 @@ public class WorldTerrainGenerator : MonoBehaviour
         onProgress?.Invoke(1f);
         onComplete?.Invoke(MapStore.GetPaths(baseName).terrain);
 
+        // ── 释放后台线程交出来的中间结果 ──
+        //
+        // generationResult 里的数组很大：8192×4096 时 heightField / plateIds / terrainTypes
+        // 各 128 MB，三张 Color32 各 128 MB，合计约 770 MB。彩色数据已经拷进贴图、
+        // 也编码进 PNG 字节写盘了，这里必须清掉引用，否则整份结果会一直挂在这个字段上。
+        ReleaseGenerationResult();
+
+        // ── 让 Unity 回收「已销毁但尚未真正释放」的原生资源 ──
+        //
+        // Destroy(Texture2D) 只是打销毁标记，原生内存与显存要等一次资源回收才真正归零。
+        // 每轮生成会换掉三张大贴图（8192 档每张 128 MB），不主动回收就会「每轮涨约 300 MB」——
+        // 这正是实测到的现象（详见 VERIFICATION.md 第 14.9 节）。
+        AsyncOperation unload = Resources.UnloadUnusedAssets();
+        yield return unload;
+
+        // 原生侧回收完，再压一次托管堆：主线程这一段（建贴图、编码 PNG）也分配了不少大数组
+        GenerationPipeline.CollectNow();
+
         yield return null;
     }
 
+    /// <summary>
+    /// 清掉 <see cref="generationResult"/> 对中间结果的引用，让那批大数组可以被回收。
+    /// 只在主线程把结果用完之后调用。
+    /// </summary>
+    private void ReleaseGenerationResult()
+    {
+        generationResult = null;
+    }
+
     /// <summary>把颜色数组做成显示用贴图（等距圆柱图：横向重复、双线性过滤）。</summary>
-    private static Texture2D CreateTexture(Color[] pixels, int width, int height, bool linear)
+    private static Texture2D CreateTexture(Color32[] pixels, int width, int height, bool linear)
     {
         var tex = new Texture2D(width, height, TextureFormat.RGBA32, false, linear);
-        tex.SetPixels(pixels);
+        tex.SetPixels32(pixels);
         tex.filterMode = FilterMode.Bilinear;
         tex.wrapMode = TextureWrapMode.Repeat;
-        tex.Apply();
+
+        // makeNoLongerReadable: true —— 释放 CPU 侧像素副本。
+        // 显示用贴图只需要 GPU 那份，8192 档每张省 134 MB（三层共省约 400 MB）。
+        tex.Apply(false, true);
         return tex;
     }
 

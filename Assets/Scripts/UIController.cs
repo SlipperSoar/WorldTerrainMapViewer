@@ -34,6 +34,9 @@ public class UIController : MonoBehaviour
     private Label _waterValue;
     private Slider _tiltSlider;
     private Label _tiltValue;
+    private Slider _resolutionSlider;
+    private Label _resolutionValue;
+    private Label _resolutionHint;
     private Button _generateButton;
     private Label _genProgress;
     private ScrollView _markerList;
@@ -203,6 +206,9 @@ public class UIController : MonoBehaviour
         _waterValue = _root.Q<Label>("water-value");
         _tiltSlider = _root.Q<Slider>("tilt-slider");
         _tiltValue = _root.Q<Label>("tilt-value");
+        _resolutionSlider = _root.Q<Slider>("resolution-slider");
+        _resolutionValue = _root.Q<Label>("resolution-value");
+        _resolutionHint = _root.Q<Label>("resolution-hint");
         _generateButton = _root.Q<Button>("generate-button");
         _genProgress = _root.Q<Label>("gen-progress-label");
         _markerList = _root.Q<ScrollView>("marker-list");
@@ -1145,26 +1151,16 @@ public class UIController : MonoBehaviour
         // ── 高度图（可选：没有就不做地形凹凸）──
         Texture2D heightTex = map.HasHeight ? DecodeTexture(map.heightPng, true) : null;
         if (heightTex != null)
-        {
             EarthManager.Instance.SetEarthHeightMap(heightTex);
-            Debug.Log($"  + 高度图已载入");
-        }
         else
-        {
             EarthManager.Instance.ClearEarthHeightMap();
-        }
 
         // ── 板块分界叠加图（可选）──
         Texture2D plateTex = map.HasPlateOverlay ? DecodeTexture(map.plateOverlayPng, false) : null;
         if (plateTex != null)
-        {
             EarthManager.Instance.SetPlateOverlay(plateTex);
-            Debug.Log($"  + 板块分界图已载入");
-        }
         else
-        {
             EarthManager.Instance.SetPlateOverlayVisible(false);
-        }
 
         // ── 地图属性（地轴倾角、水面占比）：都已在契约里 ──
         ApplyMapProperties(map);
@@ -1197,6 +1193,10 @@ public class UIController : MonoBehaviour
 
         tex.filterMode = FilterMode.Bilinear;
         tex.wrapMode = TextureWrapMode.Repeat;
+
+        // 释放 CPU 侧像素副本：显示只需要 GPU 那份。
+        // 8192 档每张省 134 MB，地形/高度/板块三层共省约 400 MB。
+        tex.Apply(false, true);
         return tex;
     }
 
@@ -1334,6 +1334,28 @@ public class UIController : MonoBehaviour
             _generateButton.clicked += OnGenerateButtonClicked;
         }
 
+        // 生成分辨率：滑条走 4 个离散档位（1024 / 2048 / 4096 / 8192 宽度）
+        if (_resolutionSlider != null)
+        {
+            _resolutionSlider.lowValue = 0;
+            _resolutionSlider.highValue = MapResolution.Widths.Length - 1;
+            _resolutionSlider.value = MapResolution.DefaultIndex;
+
+            _resolutionSlider.RegisterValueChangedCallback(evt =>
+            {
+                int index = Mathf.Clamp(
+                    Mathf.RoundToInt(evt.newValue), 0, MapResolution.Widths.Length - 1);
+
+                // 吸附到整数档位：滑条本身没有步进，这里把值扣回离散点
+                if (!Mathf.Approximately(_resolutionSlider.value, index))
+                    _resolutionSlider.SetValueWithoutNotify(index);
+
+                UpdateResolutionLabel(index);
+            });
+
+            UpdateResolutionLabel((int)_resolutionSlider.value);
+        }
+
         if (_seedRandomBtn != null)
         {
             _seedRandomBtn.clicked += () =>
@@ -1343,6 +1365,36 @@ public class UIController : MonoBehaviour
             };
         }
     }
+
+    /// <summary>
+    /// 刷新分辨率显示：标签给出「宽×高」，下面一行给出粗略内存估算；
+    /// 估算超过本机内存一半时标黄提示（不阻止生成，只提醒）。
+    /// </summary>
+    private void UpdateResolutionLabel(int index)
+    {
+        int width = MapResolution.WidthAt(index);
+
+        if (_resolutionValue != null)
+            _resolutionValue.text = MapResolution.Label(width);
+
+        if (_resolutionHint == null)
+            return;
+
+        bool warn = MapResolution.MayExceedMemory(width, SystemInfo.systemMemorySize);
+        _resolutionHint.text =
+            $"内存 {MapResolution.EstimateLabel(width)}" +
+            (warn ? "（可能超出本机内存）" : "");
+
+        if (warn)
+            _resolutionHint.AddToClassList("resolution-hint-warn");
+        else
+            _resolutionHint.RemoveFromClassList("resolution-hint-warn");
+    }
+
+    /// <summary>当前选中生成宽度（像素）。</summary>
+    private int SelectedGenerationWidth => _resolutionSlider != null
+        ? MapResolution.WidthAt(Mathf.RoundToInt(_resolutionSlider.value))
+        : MapResolution.DefaultWidth;
 
     private void OnGenerateButtonClicked()
     {
@@ -1369,10 +1421,15 @@ public class UIController : MonoBehaviour
 
         if (WorldTerrainGenerator.Instance != null)
         {
+            int width = SelectedGenerationWidth;
+            Debug.Log($"开始生成：{MapResolution.Label(width)}，seed {seed}，" +
+                      $"水面 {waterCoverage * 100:F0}%，倾角 {axialTilt:F1}°，" +
+                      $"预计内存 {MapResolution.EstimateLabel(width)}");
+
             WorldTerrainGenerator.Instance.onProgress = OnGenerationProgress;
             WorldTerrainGenerator.Instance.onComplete = OnGenerationComplete;
             WorldTerrainGenerator.Instance.onError = OnGenerationError;
-            WorldTerrainGenerator.Instance.GenerateWorld(seed, 0, waterCoverage, axialTilt);
+            WorldTerrainGenerator.Instance.GenerateWorld(seed, width, waterCoverage, axialTilt);
         }
         else
         {

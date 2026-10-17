@@ -189,13 +189,6 @@ namespace WorldTerrain
             }
         }
 
-        /// <summary>清空网格缓存（切换地图类型或需要回收内存时调用）。</summary>
-        public static void ClearCache()
-        {
-            lock (CacheLock)
-                Cache.Clear();
-        }
-
         /// <summary>创建细分 level 级的球面网格（每次新建实例；需要复用时用 <see cref="Get"/>）。</summary>
         public static SphereGrid Create(int level)
         {

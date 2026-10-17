@@ -31,8 +31,22 @@
 
 #### 环绕视角
 
-相机用**显式球面角**（`CameraController` 的 `currentX` = 水平角 H、`currentY` = 俯仰角 V）
-表示方位，`orbitRotation = Euler(V, H, 0)`：
+相机角度由一个**显式状态机** `CameraOrbitState` 保管，唯一真值是两个标量
+（H 水平角、V 俯仰角），朝向永远由它们重建：`Euler(V, H, 0)`。
+`CameraController` 只负责「读输入 → 传给状态机 → 把朝向应用到 Transform」。
+
+状态与转换：
+
+```
+Idle ──开始拖拽──▶ Dragging
+Dragging ──松开──▶ Idle
+Dragging ──点视角按钮──▶ Transitioning（拖拽被取消）
+Transitioning ──动画完成──▶ Idle
+Transitioning ──开始拖拽──▶ Dragging（动画被取消，从当前角度接着拖）
+any ──外部 SetAngles──▶ Idle
+```
+
+两条不变量由状态机保证，并可被单元测试断言：
 
 - 水平角 H 与俯仰角 V 就是右侧栏显示的两个值，不做欧拉角反解（反解在俯仰≠0 时会给出偏差值）
 - 俯仰夹在 `minY` / `maxY` 之间（默认 ±85°，硬限位 ±89.5° —— ±90° 时相机 forward 与 up
@@ -43,7 +57,8 @@
 > 早期实现用「绕世界 X 轴累乘四元数 + 过极点丢弃俯仰」的写法：俯仰轴在相机偏离 ±Z 后会
 > 退化成绕视线的滚转，而丢弃式保护会让 yaw 继续累积、直到某帧又突然通过判定 ——
 > 表现为绕星球观察时**部分角度视角跳变**，且 `minY` / `maxY` 实际从未生效。
-> 新旧算法的量化对比见 [VERIFICATION.md 第 9 节](VERIFICATION.md#9-环绕相机视角跳变)。
+> 新旧算法的量化对比见 [VERIFICATION.md 第 9 节](VERIFICATION.md#9-环绕相机视角跳变)；
+> 状态机的单元测试见 [第 12 节](VERIFICATION.md#12-管线步骤单元测试)。
 
 ## 行星地形图生成
 
@@ -67,6 +82,54 @@
 8. 计算**人文**（聚落 / 国家 / 交通 / 中文地名，见下）
 9. 将高度图的灰度图保存至`streamingAssets`目录下
 10. 根据高度、水系、冰盖与人文信息，生成对应的彩色地形图并保存
+
+### 管线结构（可独立测试的步骤）
+
+上面的流程**不是**一个长方法，而是 12 个独立步骤，由 `TerrainContext` 传数据：
+
+```
+WorldTerrainGenerator（Unity 控制器：后台线程 + 落盘 + 应用到星球）
+        ↓
+TerrainGenerator.Generate(config)          ← 门面，不依赖 UnityEngine
+        ↓
+GenerationPipeline.CreateDefault()         ← 有序步骤表
+  板块 → 地形高度场 → 气候场 → 侵蚀 → 海平面标定 → 气候反馈
+       → 水文 → 地形分类 → 板块分界图 → 高度图 → 地形图 → 人文
+```
+
+每个步骤是一个类，实现 `IGenerationStep`：`Name`、`ProgressSpan`（在总进度条上的区间）、
+`Run(ctx, progress)`。它们**只**读 `TerrainContext` 里已有的字段、只写自己负责的字段，
+因此可以脱离整条管线单独调用：
+
+| 能力 | 用法 |
+|---|---|
+| 跑全流程 | `TerrainGenerator.Generate(config)` |
+| 跑子集（如「只生成地形不生成人文」） | `TerrainGenerator.GenerateSubset(config, stepNames)` |
+| 单步执行（测试/调试） | `pipeline.RunStep("水文", ctx)` |
+| 换掉某一步 | 自己拼 `new GenerationPipeline().Add(...)` 后传入 |
+| 拿到全部中间产物 | `TerrainGenerator.GenerateContext(config)` |
+
+前置数据缺失时步骤会抛**说明清楚的** `InvalidOperationException`
+（例如「步骤「水文」缺少前置数据：HeightField（高度场）」），而不是空引用崩溃。
+这些都有单元测试覆盖，见 [VERIFICATION.md 第 12 节](VERIFICATION.md#12-管线步骤单元测试)。
+
+### 地图数据契约（MapData）
+
+生成器与查看器之间只通过 `MapData` 打交道，两边都不自己拼文件名或读 JSON：
+
+| 契约字段 | 内容 |
+|---|---|
+| `terrainPng` / `heightPng` / `plateOverlayPng` | 三张图的 **PNG 字节**（缺失则为 null） |
+| `axialTilt` / `waterCoverage` / `seed` / `generatedAt` | 地图属性 |
+| `human` | 人文数据（null = 没生成人文） |
+| `HasTerrain` / `HasHeight` / `HasPlateOverlay` / `HasHuman` / `HasClimate` | 图层存在性 |
+| `Validate(out reason)` | 查看器载入前的契约校验 |
+
+读写由 `MapStore` 负责（`Load` / `Save` / `FromResult` / `ListMapNames`），
+文件布局与历史版本一致，旧地图仍可读。因为契约里是**纯数据**（不放 `Texture2D`），
+所以「外部导入符合格式的地图」只需构造一个 `MapData` 交给查看器。
+
+> 标记与线条**不在**契约里：它们是浏览期的用户标注，不属于地图内容。
 
 ### 气候与侵蚀（贴近真实地球的部分）
 

@@ -16,6 +16,7 @@
 - [9. 环绕相机（视角跳变）](#9-环绕相机视角跳变)
 - [10. 性能实测](#10-性能实测)
 - [11. 并行加速](#11-并行加速)
+- [12. 管线步骤单元测试](#12-管线步骤单元测试)
 
 ---
 
@@ -75,12 +76,27 @@ dotnet run -c Release
 
 ### 1.4 环绕相机验证台
 
-`dsh_preview/icecheck/orbitcheck/`。用最小四元数实现复现**新旧两套环绕算法**，
-逐步模拟鼠标拖拽，比较俯仰跟随误差、单帧突变（二阶差分）、横滚角与限位行为；
-并验证相机 `forward` 是否精确指向球心。
+`dsh_preview/icecheck/orbitcheck/` 有两个工程：
+
+- **`orbitcheck.csproj`** — 用最小四元数实现复现**新旧两套环绕算法**，逐步模拟鼠标拖拽，
+  比较俯仰跟随误差、单帧突变（二阶差分）、横滚角与限位行为，并验证相机 `forward`
+  是否精确指向球心。用于量化「旧写法为什么会跳变」（见[第 9 节](#9-环绕相机视角跳变)）。
+- **`orbitstate.csproj`** — 编译**真实**的 `CameraOrbitState.cs`，对它做状态机单元测试
+  （见[第 12.3 节](#123-相机状态机的单元测试)）。
 
 ```
 cd dsh_preview/icecheck/orbitcheck
+dotnet run -c Release                                   # 新旧算法对比
+dotnet build orbitstate.csproj -c Release && ./bin/Release/net9.0/orbitstate.exe   # 状态机测试
+```
+
+### 1.5 步骤单元测试台
+
+`dsh_preview/icecheck/stepcheck/`。直接编译真实的生成步骤类，验证
+「每步可独立运行 / 前置缺失报清楚的错 / 子集运行可用」。见[第 12 节](#12-管线步骤单元测试)。
+
+```
+cd dsh_preview/icecheck/stepcheck
 dotnet run -c Release
 ```
 
@@ -504,6 +520,94 @@ $env:WORLDTERRAIN_SERIAL=0   # 并行
 
 要进一步加速只能**换算法**（例如把雨滴侵蚀换成可并行的 pipe/汇流模型），但那会改变地形输出，
 需要重新标定所有基线 —— 这和「加速」是两件事，需要单独决策。
+
+---
+
+## 12. 管线步骤单元测试
+
+把生成链路拆成 `TerrainContext` + `IGenerationStep` + `GenerationPipeline` 之后，
+每一步都可以脱离整条管线单独调用。这一节记录**这种结构本身**的验证方式。
+
+### 12.1 验收前提：拆分不改变输出
+
+拆分是纯结构改动，因此第一验收条件是**地形输出逐位不变**。
+
+方法：改造前先存一份 11 个 dump 的 SHA-256 作为基线，改完后再跑一遍对比。
+
+| 检查 | 结果 |
+|---|---|
+| `height.f32` / `moisture.f32` / `runoff.f32` / `discharge.f32` / `riverwidth.f32` / `waterdepth.f32` | 逐位相同 |
+| `delta.bin` / `estuary.bin` / `lake.bin` / `river.bin` / `seasonal.bin` | 逐位相同 |
+
+> 基线值（1024×512，seed 20260801）已记录在 `dsh_preview/icecheck/out/baseline/baseline.json`。
+> 任何「只改结构」的重构都应跑一次这个对比。
+
+### 12.2 步骤级单元测试
+
+工程在 `dsh_preview/icecheck/stepcheck/`。它直接编译 `Assets/Scripts/WorldTerrain/`
+下的真实步骤类，测的就是生产代码：
+
+```
+cd dsh_preview/icecheck/stepcheck
+dotnet run -c Release
+```
+
+覆盖四组断言：
+
+**① 管线形状** —— 默认管线 12 步；进度区间必须**连续铺满 0→1 且单调递增**
+（否则进度条会跳）；步骤名唯一（否则 `RunStep` / `RunSubset` 会选错）。
+
+**② 前置缺失要报清楚的错** —— 对 11 个依赖前置的步骤，在空上下文里执行，
+必须抛 `InvalidOperationException` 且消息里同时出现**步骤名**与**缺失字段名**：
+
+```
+步骤「水文」缺少前置数据：HeightField（高度场）（请先执行产出它的步骤）
+```
+
+「板块」步骤无前置，可独立跑通。
+
+**③ 单步执行产出逐个出现** —— 按管线顺序一步一步跑，每步完成后断言它负责的字段
+已出现且长度正确（`HeightField` / `Moisture` / `Hydrology.riverMask` / `TerrainTypes` /
+`PlateOverlayColors` / `HeightColors` / `TerrainColors` / `Human`）。
+最后断言 `ToResult()` 正确带出宽度、高度、人文与倾角。
+
+**④ 子集运行** —— `GenerateSubset` 只跑地形相关步骤时：
+
+| 断言 | 结果 |
+|---|---|
+| 产出地形图 | ✔ |
+| **未生成人文**（`ctx.Human == null`） | ✔ |
+| `ToResult()` 的人文为 null（契约允许） | ✔ |
+| 事后单独补跑「人文」步骤可补上 | ✔ |
+
+这最后一条正是拆分要换来的能力：**「只生成地形不生成人文」不再需要改生成流程**。
+
+### 12.3 相机状态机的单元测试
+
+工程在 `dsh_preview/icecheck/orbitcheck/orbitstate.csproj`。它编译**真实的**
+`CameraOrbitState.cs`，配合 `tools/UnityMathStub.cs`（最小 Vector3 / Quaternion / Mathf 替身），
+因此测的不是验证台里另写的一份算法。
+
+```
+cd dsh_preview/icecheck/orbitcheck
+dotnet build orbitstate.csproj -c Release
+./bin/Release/net9.0/orbitstate.exe
+```
+
+| 用例 | 断言 |
+|---|---|
+| 初始状态 | `Idle`，H = V = 0 |
+| 状态转换 | `BeginDrag → Dragging`、`EndDrag → Idle`、拖拽中点按钮 `→ Transitioning` |
+| 忽略非法输入 | `Idle` 下的 `Drag` 被忽略；过渡中的 `Drag` 被忽略 |
+| **俯仰不越界** | 5000 次随机拖拽（含 ±200° 的极端增量）后仍落在 ±80° 内 |
+| **到限位不丢输入** | 俯仰贴顶后，水平角仍按 200 次 ×1° 精确累加 |
+| 过渡动画 | 过程有帧变化、结束回到 `Idle`、精确落在目标 H / V |
+| 过渡被打断 | 中途 `BeginDrag` 后从**当前角度**继续，不回起点 |
+| 球面几何 | 35 组 (H, V) 组合下 `OrbitPosition` 的 forward 指向球心，最小 dot = **1.000000** |
+| 报告一致性 | H / V 与拖拽量一致，H 归一化到 [0, 360) |
+
+旧实现里这些边界情况是隐性耦合的（俯仰轴随 yaw 漂移、到极点整帧丢弃），
+只能靠复现去猜；现在每条转换都有名字、都能单独断言。
 
 ---
 

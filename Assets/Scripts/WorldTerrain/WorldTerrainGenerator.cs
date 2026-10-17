@@ -142,78 +142,31 @@ public class WorldTerrainGenerator : MonoBehaviour
             yield break;
         }
 
-        // ── Main thread: create Texture2D from computed colour arrays ──
-        Texture2D heightTex = new Texture2D(
-            result.width, result.height, TextureFormat.RGBA32, false, true);
-        heightTex.SetPixels(result.heightColors);
-        heightTex.Apply();
-
-        Texture2D terrainTex = new Texture2D(
-            result.width, result.height, TextureFormat.RGBA32, false);
-        terrainTex.SetPixels(result.terrainColors);
-        terrainTex.filterMode = FilterMode.Bilinear;
-        terrainTex.wrapMode = TextureWrapMode.Repeat;
-        terrainTex.Apply();
-
-        // ── Save PNGs to StreamingAssets ──
+        // ── 主线程：把结果整理成 MapData 契约，落盘 ──
+        // 落盘/读取都走 MapStore，生成器与查看器不再各自拼文件名。
         string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         string seedStr = seed > 0 ? seed.ToString() : "rnd";
         string baseName = $"gen_{seedStr}_{timestamp}";
-        string heightPath = Path.Combine(
-            Application.streamingAssetsPath, baseName + "_height.png");
-        string terrainPath = Path.Combine(
-            Application.streamingAssetsPath, baseName + ".png");
-        string platePath = Path.Combine(
-            Application.streamingAssetsPath, baseName + "_plates.png");
 
-        // Create plate textures — save the transparent version as PNG so that
-        // reloading from disk preserves the correct alpha for the overlay sphere
-        Texture2D plateTex = new Texture2D(
-            result.width, result.height, TextureFormat.RGBA32, false);
-        plateTex.SetPixels(result.plateOverlayColors);
-        plateTex.Apply();
+        MapData map = MapStore.FromResult(result, baseName);
+        map.seed = seed;
+        map.axialTilt = config.axialTilt;
+        map.waterCoverage = config.waterCoverage;
 
-        Texture2D overlayTex = new Texture2D(
-            result.width, result.height, TextureFormat.RGBA32, false);
-        overlayTex.SetPixels(result.plateOverlayColors);
-        overlayTex.filterMode = FilterMode.Bilinear;
-        overlayTex.wrapMode = TextureWrapMode.Repeat;
-        overlayTex.Apply();
-
-        try
+        if (!MapStore.Save(map))
         {
-            File.WriteAllBytes(heightPath, heightTex.EncodeToPNG());
-            Debug.Log($"Saved heightmap: {heightPath}");
-
-            File.WriteAllBytes(terrainPath, terrainTex.EncodeToPNG());
-            Debug.Log($"Saved terrain map: {terrainPath}");
-
-            File.WriteAllBytes(platePath, plateTex.EncodeToPNG());
-            Debug.Log($"Saved plate division map: {platePath}");
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"Failed to save PNG files: {e.Message}");
-            onError?.Invoke(e.Message);
+            string error = $"保存地图失败（{baseName}）";
+            Debug.LogError(error);
+            onError?.Invoke(error);
             yield break;
         }
 
-        // ── Save map properties (地轴倾角等) alongside the map ──
-        MapMetaData.Save(baseName, new MapMetaData
-        {
-            axialTilt = config.axialTilt,
-            waterCoverage = config.waterCoverage,
-            seed = seed,
-            mapWidth = config.width,
-            mapHeight = config.height,
-            generatedAt = DateTime.Now.ToString("o"),
-            human = HumanMapSummary.From(result.human)
-        });
+        // ── 主线程：为显示创建贴图（与落盘无关，落盘用的是契约里的 PNG 字节）──
+        Texture2D heightTex = CreateTexture(result.heightColors, result.width, result.height, true);
+        Texture2D terrainTex = CreateTexture(result.terrainColors, result.width, result.height, false);
+        Texture2D overlayTex = CreateTexture(result.plateOverlayColors, result.width, result.height, false);
 
-        // ── 人文图层随地图一起保存（<地图名>_human.json）──
-        HumanGeographyData.Save(baseName, result.human);
-
-        // ── Apply terrain map and height map to Earth sphere ──
+        // ── 应用到星球 ──
         if (EarthManager.Instance != null)
         {
             EarthManager.Instance.SetEarthSurface(terrainTex);
@@ -229,138 +182,37 @@ public class WorldTerrainGenerator : MonoBehaviour
         }
 
         onProgress?.Invoke(1f);
-        onComplete?.Invoke(terrainPath);
+        onComplete?.Invoke(MapStore.GetPaths(baseName).terrain);
 
         yield return null;
     }
 
+    /// <summary>把颜色数组做成显示用贴图（等距圆柱图：横向重复、双线性过滤）。</summary>
+    private static Texture2D CreateTexture(Color[] pixels, int width, int height, bool linear)
+    {
+        var tex = new Texture2D(width, height, TextureFormat.RGBA32, false, linear);
+        tex.SetPixels(pixels);
+        tex.filterMode = FilterMode.Bilinear;
+        tex.wrapMode = TextureWrapMode.Repeat;
+        tex.Apply();
+        return tex;
+    }
+
     /// <summary>
-    /// Background thread entry point — all computation happens here.
-    /// No UnityEngine API calls (only System.Math and our own types).
+    /// 后台线程入口 —— 所有计算都在这里发生，不调用任何 UnityEngine API。
+    ///
+    /// 具体步骤不写在这里：管线与各步骤见 <c>WorldTerrain/Generation/</c>，
+    /// 每个步骤都是独立的类、输入输出都在 <see cref="TerrainContext"/> 里，
+    /// 可以单独构造上下文来测试或整体替换。
     /// </summary>
     private void GenerateInBackground(WorldGenConfig config)
     {
         try
         {
-            var rng = new System.Random(config.seed);
-            var noise = new SeededNoise(config.seed);
+            WorldGenResult result = TerrainGenerator.Generate(
+                config, p => generationProgress = p);
 
-            // Step 1: Generate tectonic plates
-            generationProgress = 0.05f;
-            var plates = PlateTectonicsGenerator.GeneratePlates(config, rng);
-
-            // Voronoi plate assignment
-            generationProgress = 0.15f;
-            var plateIds = PlateTectonicsGenerator.AssignPlates(
-                config.width, config.height, plates, noise);
-
-            // Steps 2-3: Height field with drift-induced boundary effects
-            float[] heightField;
-            float[] sphereRunoff = null;                    // 球面径流场（只有球面路径才有）
-            float sphereRunoffThreshold = 0f;
-            if (!config.planarGeneration)
-            {
-                // 球面生成域：在单位球面的等面积网格上生成大地形，再投影成等距圆柱图。
-                // 没有极点奇点、没有经度接缝，板块距离按球面角距计算。
-                generationProgress = 0.18f;
-                var sphere = SphericalTerrainGenerator.Generate(
-                    config, plates, noise, p => generationProgress = 0.18f + 0.12f * p);
-                heightField = sphere.Height;
-                sphereRunoff = sphere.Runoff;
-                sphereRunoffThreshold = sphere.RunoffChannelThreshold;
-            }
-            else
-            {
-                generationProgress = 0.30f;
-                heightField = PlateTectonicsGenerator.GenerateHeights(
-                    config, rng, plateIds, plates, noise);
-
-                // 平面路径没有球面径流场：水文自动退回平面判据，
-                // 不会像以前那样误用「上一张图留下的球面汇流」。
-            }
-
-            // Step 3b: 气候场（纬向蒸发 + 盛行风带输送 + 迎风坡降水/雨影）
-            generationProgress = 0.34f;
-            float[] moisture = ClimateModel.ComputeMoistureField(
-                config.width, config.height, heightField, noise, config.axialTilt,
-                p => generationProgress = 0.34f + 0.03f * p);
-
-            // Step 3c: 侵蚀 —— 水力（雨滴冲刷河谷、下游沉积）+ 热力（休止角），
-            //          强度与降水耦合：湿润区冲刷更强。
-            //          球面路径已在球面格点上做过一次「大尺度」侵蚀（等面积、无极点接缝），
-            //          这里再在投影后的像素网格上做一次「细尺度」雕刻 —— 两级尺度互补：
-            //          球面那级决定山谷走向，这一级决定河谷的锐利程度。
-            ErosionSimulator.Erode(config.width, config.height, heightField, moisture, config.seed,
-                p => generationProgress = 0.37f + 0.10f * p);
-
-            // 侵蚀会整体削低陆地，重新标定海平面以保持海陆比例
-            PlateTectonicsGenerator.ApplyWaterCoverage(
-                config.width, config.height, heightField, config.waterCoverage);
-
-            // 地形变了，复算一次气候：迎风坡与雨影随之改变（气候 ↔ 地形一次反馈）
-            generationProgress = 0.48f;
-            moisture = ClimateModel.ComputeMoistureField(
-                config.width, config.height, heightField, noise, config.axialTilt,
-                p => generationProgress = 0.48f + 0.02f * p);
-
-            // Step 4: 水文 —— 河网、湖泊、三角洲（用侵蚀后的地形与气候）
-            // 球面径流场显式传入：河网走向按球面真实汇流判定，平面汇流只决定河宽。
-            // 湖泊在像素网格上判定，但面积门槛按真实球面面积（cos lat）折算，纬度不失真。
-            generationProgress = 0.50f;
-            var hydrology = HydrologyGenerator.Generate(
-                config.width, config.height, heightField, noise,
-                p => generationProgress = 0.50f + 0.15f * p, moisture,
-                sphereRunoff, sphereRunoffThreshold, config.axialTilt);
-
-            // Steps 5-6: Terrain classification + 冰盖/雪线规则（依据地图的地轴倾角）
-            generationProgress = 0.70f;
-            var terrainTypes = TerrainClassifier.Classify(
-                config.width, config.height, heightField,
-                plateIds, hydrology, noise, config.axialTilt, moisture);
-
-            // Step 5b: Render plate division map (transparent for overlay + PNG)
-            generationProgress = 0.75f;
-            var plateOverlayColors = TerrainMapRenderer.RenderPlateMap(
-                config.width, config.height, plateIds, true);
-
-            // Step 8: Grayscale heightmap
-            generationProgress = 0.82f;
-            var heightColors = TerrainMapRenderer.RenderHeightMap(
-                config.width, config.height, heightField);
-
-            // Step 7: Color terrain map (hypsometric tinting)
-            generationProgress = 0.92f;
-            var terrainColors = TerrainMapRenderer.RenderTerrainMap(
-                config.width, config.height, heightField,
-                terrainTypes, hydrology, noise);
-
-            // Step 9: 人文（聚落 / 国家 / 交通 / 中文地名）
-            generationProgress = 0.93f;
-            var human = HumanGeographyGenerator.Generate(
-                config.width, config.height, heightField, hydrology,
-                config.axialTilt, noise, config.seed,
-                p => generationProgress = 0.93f + 0.06f * p, moisture);
-
-            // 云层预览需要气候场数据：把湿度场降采样后随人文数据一起落盘
-            // （复用 _human.json，不新增文件；见 HumanGeographyData.SetMoistureField）
-            byte[] cloudMoisture = HumanGeographyData.DownsampleMoisture(
-                moisture, config.width, config.height, 256, out int mw, out int mh);
-            human.SetMoistureField(cloudMoisture, mw, mh);
-
-            generationResult = new WorldGenResult
-            {
-                width = config.width,
-                height = config.height,
-                heightField = heightField,
-                plateIds = plateIds,
-                terrainTypes = terrainTypes,
-                heightColors = heightColors,
-                terrainColors = terrainColors,
-                plateOverlayColors = plateOverlayColors,
-                axialTilt = config.axialTilt,
-                waterCoverage = config.waterCoverage,
-                human = human
-            };
+            generationResult = result;
             generationProgress = 1.0f;
         }
         catch (Exception e)

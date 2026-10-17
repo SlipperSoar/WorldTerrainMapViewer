@@ -3,22 +3,21 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// 环绕星球旋转视角。用**显式球面角 (yaw / pitch)** 表示相机方位，而不是累乘四元数。
+/// 环绕星球旋转视角。
 ///
-/// 角度约定（与 UI 显示的 H / V 一致）：
-///   yaw   = H，相机水平朝向角（绕世界 Y 轴）
-///   pitch = V，相机俯仰角（相机 forward 与水平面的夹角）
+/// 角度真值是**显式球面角**（H = 水平角，V = 俯仰角），由
+/// <see cref="CameraOrbitState"/> 状态机保管；本类只负责
+/// 「读输入 → 传给状态机 → 把状态机的朝向应用到 Transform」。
 ///
-/// 相机位置 = 目标 + <c>Euler(pitch, yaw, 0) · (0,0,-distance)</c>，
-/// 于是 <c>pitch &gt; 0</c> 表示相机在星球**上方**俯视，《V》显示正数。
+/// 相机位置 = 目标 + <c>Euler(V, H, 0) · (0,0,-distance)</c>，
+/// <c>V &gt; 0</c> 表示相机在星球**上方**俯视，《V》显示正数。
 ///
-/// 为什么重写（旧写法的两个缺陷）：
-///   ① 旧代码 pitch 绕【世界 X 轴】累乘。该轴只在相机位于 ±Z 方向时等于改变
-///      球面极角的切向轴；相机转到 ±X 方向时它退化成绕视线的滚转，轨迹不可预测。
-///   ② 过极点时的保护不是夹紧角度、而是**把这一帧的俯仰整个丢掉**，而 yaw 继续累加，
-///      直到某帧那个被丢掉的量又碰巧通过 <c>camUp.y &gt;= 0</c> 判定 —— 视角**突然跳变**。
-///      实测：俯仰上限失效，拖到底相机一路翻到 -89.9°（几乎贴到南极）才停住。
-///   现在 pitch 到限位就夹住、yaw 照常累积，全程连续。
+/// 为什么不再用「累乘四元数 + 过极点丢弃」（见 git 历史）：
+///   ① 俯仰绕**世界 X 轴**累乘时，该轴只在相机位于 ±Z 方向才等于改变球面极角的切向轴；
+///      转到 ±X 方向时它退化成绕视线的滚转，轨迹不可预测。
+///   ② 过极点时的保护是**把这一帧的俯仰整个丢掉**，而 yaw 继续累加，
+///      直到某帧又被判定通过 —— 表现为视角**突然跳变**，且 minY/maxY 从未生效。
+///   现在俯仰到限位就夹住、yaw 照常累积，全程连续。
 /// </summary>
 public class CameraController : MonoBehaviour
 {
@@ -34,26 +33,22 @@ public class CameraController : MonoBehaviour
 
     [SerializeField] private float rotationSpeed = 200f;
 
-    [Tooltip("当前水平角 H（度），由鼠标拖拽实时更新")]
-    [SerializeField] private float currentX = 0f;
-
-    [Tooltip("当前俯仰角 V（度）：正 = 相机在星球上方俯视，负 = 从下方仰视")]
-    [SerializeField] private float currentY = 0f;
-
     [Tooltip("俯仰下限（度）：-85 ≈ 从正下方仰视")]
     [SerializeField] private float minY = -85f;
 
     [Tooltip("俯仰上限（度）：+85 ≈ 从正上方俯视")]
     [SerializeField] private float maxY = 85f;
 
-    /// <summary>
-    /// 俯仰角的绝对硬限位。取不到 ±90：那里相机 forward 与 up 共线，
-    /// LookRotation 之类的朝向解算会退化（数值抖动）。
-    /// </summary>
-    private const float PitchHardLimit = 89.5f;
+    [Tooltip("视角按钮切换时的过渡角速度（度/秒）")]
+    [SerializeField] private float transitionSpeed = 180f;
 
-    private Quaternion orbitRotation = Quaternion.identity;
+    /// <summary>角度状态机（唯一真值）。</summary>
+    private readonly CameraOrbitState orbit = new CameraOrbitState();
+
     private Vector3 offset;
+
+    /// <summary>当前状态（Idle / Dragging / Transitioning），供 UI 与测试读取。</summary>
+    public CameraOrbitState.Phase OrbitPhase => orbit.State;
 
     #endregion
 
@@ -69,13 +64,16 @@ public class CameraController : MonoBehaviour
 
         offset = transform.position - target.position;
 
-        // 从当前相机相对目标的方位反解 (yaw, pitch)，保证起始视角不被改动
+        orbit.SetPitchLimits(minY, maxY);
+        orbit.TransitionSpeed = transitionSpeed;
+
+        // 从当前相机相对目标的方位反解 (H, V)，保证起始视角不被改动
         Vector3 lookDir = offset.sqrMagnitude > 1e-8f ? -offset.normalized : Vector3.forward;
 
         float yaw = Mathf.Atan2(lookDir.x, lookDir.z) * Mathf.Rad2Deg;
         float pitch = Mathf.Asin(Mathf.Clamp(lookDir.y, -1f, 1f)) * Mathf.Rad2Deg;
 
-        SetYawPitch(yaw, pitch);
+        orbit.SetAngles(yaw, pitch);
         UpdateCameraPosition();
     }
 
@@ -86,27 +84,26 @@ public class CameraController : MonoBehaviour
 
         HandleScrollWheel();
         HandleRightClickOrbit();
+        orbit.Tick(Time.deltaTime);
         UpdateCameraPosition();
     }
 
-    /// <summary>
-    /// Inspector 改参数时夹紧范围并同步。
-    /// 之前 minY / maxY 被声明了却从未被任何代码读取（编译器会报 CS0414），
-    /// 现在它们是俯仰的真实上下限。
-    /// </summary>
+    /// <summary>Inspector 改参数时同步到状态机（顺带夹紧范围、保证 min ≤ max）。</summary>
     private void OnValidate()
     {
-        minY = Mathf.Clamp(minY, -PitchHardLimit, PitchHardLimit);
-        maxY = Mathf.Clamp(maxY, -PitchHardLimit, PitchHardLimit);
+        minY = Mathf.Clamp(minY, -CameraOrbitState.PitchHardLimit, CameraOrbitState.PitchHardLimit);
+        maxY = Mathf.Clamp(maxY, -CameraOrbitState.PitchHardLimit, CameraOrbitState.PitchHardLimit);
         if (minY > maxY)
             minY = maxY;
 
-        currentY = Mathf.Clamp(currentY, minY, maxY);
         minDistance = Mathf.Max(0.01f, minDistance);
         maxDistance = Mathf.Max(minDistance, maxDistance);
 
+        orbit.SetPitchLimits(minY, maxY);
+        orbit.TransitionSpeed = transitionSpeed;
+
         if (Application.isPlaying)
-            SetYawPitch(currentX, currentY);
+            UpdateCameraPosition();
     }
 
     #endregion
@@ -125,40 +122,42 @@ public class CameraController : MonoBehaviour
 
     private void HandleRightClickOrbit()
     {
-        if (!Input.GetMouseButton(1))
-            return;
+        if (Input.GetMouseButton(1))
+        {
+            // 按下右键：打断过渡，进入拖拽
+            orbit.BeginDrag();
 
-        // 直接累加到角度标量上再夹紧 —— 不再有「整帧丢弃」这种不连续操作
-        currentX += Input.GetAxis("Mouse X") * rotationSpeed * Time.deltaTime;
-        currentY -= Input.GetAxis("Mouse Y") * rotationSpeed * Time.deltaTime;
-        currentY = Mathf.Clamp(currentY, minY, maxY);
-
-        orbitRotation = Quaternion.Euler(currentY, currentX, 0f);
+            float deltaYaw = Input.GetAxis("Mouse X") * rotationSpeed * Time.deltaTime;
+            float deltaPitch = -Input.GetAxis("Mouse Y") * rotationSpeed * Time.deltaTime;
+            orbit.Drag(deltaYaw, deltaPitch);
+        }
+        else
+        {
+            orbit.EndDrag();
+        }
     }
 
     #endregion
 
     #region 内部
 
-    /// <summary>设置朝向（会夹紧俯仰角）。</summary>
-    private void SetYawPitch(float yaw, float pitch)
-    {
-        currentX = yaw;
-        currentY = Mathf.Clamp(pitch, minY, maxY);
-        orbitRotation = Quaternion.Euler(currentY, currentX, 0f);
-    }
-
     private void UpdateCameraPosition()
     {
         if (target == null)
             return;
 
-        Vector3 direction = new Vector3(0, 0, -distance);
-        transform.position = target.position + orbitRotation * direction;
-        // 直接用 orbitRotation 当朝向：球面坐标下它就是「从目标指向相机」的正交基，
+        // 直接用状态机的朝向：球面坐标下它就是「从目标指向相机」的正交基，
         // 且 forward 恒精确指向球心（离线校验台实测 35 组组合 dot 均为 1.000000）；
         // 用 LookAt 反而会在两极附近因 up 与 forward 共线而抖动
-        transform.rotation = orbitRotation;
+        transform.position = orbit.OrbitPosition(target.position, distance);
+        transform.rotation = orbit.Rotation;
+    }
+
+    /// <summary>向目标角度做过渡（视角按钮用）。</summary>
+    private void TransitionTo(float yaw, float pitch)
+    {
+        orbit.BeginTransition(yaw, pitch);
+        UpdateCameraPosition();
     }
 
     #endregion
@@ -167,19 +166,18 @@ public class CameraController : MonoBehaviour
 
     public float GetHorizontalRotation()
     {
-        return Mathf.Repeat(currentX, 360f) % 360f;
+        return Mathf.Repeat(orbit.YawDegrees, 360f) % 360f;
     }
 
     public float GetVerticalRotation()
     {
-        return currentY;
+        return orbit.PitchDegrees;
     }
 
     /// <summary>赤道视角（世界空间水平视角，与星球倾角无关）</summary>
     public void SetEquatorView()
     {
-        SetYawPitch(0f, 0f);
-        UpdateCameraPosition();
+        TransitionTo(0f, 0f);
     }
 
     /// <summary>
@@ -188,26 +186,25 @@ public class CameraController : MonoBehaviour
     /// </summary>
     public void SetNorthPoleView()
     {
-        // SetYawPitch 会再夹到 [minY, maxY]，这里只需保证数值本身不超过硬限位
-        SetYawPitch(0f, PositivePitchTarget);
-        UpdateCameraPosition();
+        TransitionTo(0f, PositivePitchTarget);
     }
 
     /// <summary>南极视角：从正下方仰视，同理停在俯仰下限。</summary>
     public void SetSouthPoleView()
     {
-        SetYawPitch(0f, -PositivePitchTarget);
-        UpdateCameraPosition();
+        TransitionTo(0f, -PositivePitchTarget);
     }
-
-    /// <summary>俯仰能取到的最大幅值（不超过硬限位）。</summary>
-    private float PositivePitchTarget => Mathf.Min(PitchHardLimit, Mathf.Max(Mathf.Abs(minY), Mathf.Abs(maxY), 75f));
 
     /// <summary>垂直俯视（与北极视角同向）</summary>
     public void SetTopDownView()
     {
         SetNorthPoleView();
     }
+
+    /// <summary>俯仰能取到的最大幅值（不超过硬限位）。</summary>
+    private float PositivePitchTarget
+        => Mathf.Min(CameraOrbitState.PitchHardLimit,
+                     Mathf.Max(Mathf.Abs(minY), Mathf.Abs(maxY), 75f));
 
     #endregion
 }

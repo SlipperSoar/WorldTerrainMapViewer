@@ -1099,6 +1099,13 @@ public class UIController : MonoBehaviour
         StartCoroutine(LoadTextureCoroutine(fullPath));
     }
 
+    /// <summary>
+    /// 载入一张地图并应用到星球。
+    ///
+    /// 不再手工拼各个文件名：先由 <see cref="MapStore"/> 读成 <see cref="MapData"/> 契约，
+    /// 再按契约逐项应用 —— 缺高度图就不做凹凸、缺板块图就隐藏叠加层、
+    /// 缺人文就清空人文图层。新增图层时只需要改契约与这里。
+    /// </summary>
     private IEnumerator LoadTextureCoroutine(string filePath)
     {
         if (!File.Exists(filePath))
@@ -1107,88 +1114,90 @@ public class UIController : MonoBehaviour
             yield break;
         }
 
-        byte[] fileData = File.ReadAllBytes(filePath);
-        Texture2D newTexture = new Texture2D(2, 2);
-        if (newTexture.LoadImage(fileData))
+        string baseName = Path.GetFileNameWithoutExtension(filePath);
+        MapData map = MapStore.Load(baseName);
+
+        if (map == null)
         {
-            newTexture.filterMode = FilterMode.Bilinear;
-            newTexture.wrapMode = TextureWrapMode.Repeat;
-            if (_currentTexture != null)
-                Destroy(_currentTexture);
-            _currentTexture = newTexture;
-            EarthManager.Instance.SetEarthSurface(newTexture);
+            Debug.LogError($"载入地图失败：找不到 {baseName} 的地形图");
+            yield break;
+        }
 
-            // Auto-detect and load matching height map
-            string baseName = Path.GetFileNameWithoutExtension(filePath);
-            string heightPath = Path.Combine(
-                Path.GetDirectoryName(filePath),
-                baseName + "_height" + Path.GetExtension(filePath));
-            if (File.Exists(heightPath))
-            {
-                byte[] heightData = File.ReadAllBytes(heightPath);
-                Texture2D heightTex = new Texture2D(2, 2, TextureFormat.RGBA32, false, true);
-                if (heightTex.LoadImage(heightData))
-                {
-                    heightTex.filterMode = FilterMode.Bilinear;
-                    heightTex.wrapMode = TextureWrapMode.Repeat;
-                    EarthManager.Instance.SetEarthHeightMap(heightTex);
-                    Debug.Log($"Auto-loaded height map: {heightPath}");
-                }
-                else
-                {
-                    Destroy(heightTex);
-                    EarthManager.Instance.ClearEarthHeightMap();
-                }
-            }
-            else
-            {
-                EarthManager.Instance.ClearEarthHeightMap();
-            }
+        if (!map.Validate(out string reason))
+        {
+            Debug.LogError($"载入地图失败：{reason}");
+            yield break;
+        }
 
-            // Auto-detect and load matching plate overlay
-            string plateOverlayPath = Path.Combine(
-                Path.GetDirectoryName(filePath),
-                baseName + "_plates" + Path.GetExtension(filePath));
-            if (File.Exists(plateOverlayPath))
-            {
-                byte[] plateData = File.ReadAllBytes(plateOverlayPath);
-                Texture2D plateOverlayTex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
-                if (plateOverlayTex.LoadImage(plateData))
-                {
-                    plateOverlayTex.filterMode = FilterMode.Bilinear;
-                    plateOverlayTex.wrapMode = TextureWrapMode.Repeat;
-                    EarthManager.Instance.SetPlateOverlay(plateOverlayTex);
-                    Debug.Log($"Auto-loaded plate overlay: {plateOverlayPath}");
-                }
-                else
-                {
-                    Destroy(plateOverlayTex);
-                }
-            }
-            else
-            {
-                EarthManager.Instance.SetPlateOverlayVisible(false);
-            }
+        // ── 彩色地形图（必需）──
+        Texture2D terrainTex = DecodeTexture(map.terrainPng, false);
+        if (terrainTex == null)
+        {
+            Debug.LogError($"地形图解码失败：{filePath}");
+            yield break;
+        }
 
-            // 载入该地图自身的地图属性（地轴倾角等）
-            ApplyMapProperties(baseName);
+        if (_currentTexture != null)
+            Destroy(_currentTexture);
+        _currentTexture = terrainTex;
+        EarthManager.Instance.SetEarthSurface(terrainTex);
 
-            // 载入该地图的人文图层（聚落 / 国家 / 交通线），叠加显示在地球上
-            if (Application.isPlaying && EarthManager.Instance != null)
-                EarthManager.Instance.SetHumanGeography(HumanGeographyData.Load(baseName), baseName);
-
-            // Auto-load matching line data
-            EarthManager.Instance.LoadLinesFromJSON(baseName);
-
-            // Auto-load matching marker data
-            EarthManager.Instance.LoadMarkersFromJSON(baseName);
+        // ── 高度图（可选：没有就不做地形凹凸）──
+        Texture2D heightTex = map.HasHeight ? DecodeTexture(map.heightPng, true) : null;
+        if (heightTex != null)
+        {
+            EarthManager.Instance.SetEarthHeightMap(heightTex);
+            Debug.Log($"  + 高度图已载入");
         }
         else
         {
-            Debug.LogError($"Failed to load image: {filePath}");
-            Destroy(newTexture);
+            EarthManager.Instance.ClearEarthHeightMap();
         }
+
+        // ── 板块分界叠加图（可选）──
+        Texture2D plateTex = map.HasPlateOverlay ? DecodeTexture(map.plateOverlayPng, false) : null;
+        if (plateTex != null)
+        {
+            EarthManager.Instance.SetPlateOverlay(plateTex);
+            Debug.Log($"  + 板块分界图已载入");
+        }
+        else
+        {
+            EarthManager.Instance.SetPlateOverlayVisible(false);
+        }
+
+        // ── 地图属性（地轴倾角、水面占比）：都已在契约里 ──
+        ApplyMapProperties(map);
+
+        // ── 人文图层（可选）──
+        if (Application.isPlaying && EarthManager.Instance != null)
+            EarthManager.Instance.SetHumanGeography(map.human, baseName);
+
+        Debug.Log($"已载入地图 {map}");
+
+        // ── 用户标注（不属于地图内容，单独载入）──
+        EarthManager.Instance.LoadLinesFromJSON(baseName);
+        EarthManager.Instance.LoadMarkersFromJSON(baseName);
+
         yield return null;
+    }
+
+    /// <summary>把 PNG 字节解成贴图；失败返回 null。</summary>
+    private static Texture2D DecodeTexture(byte[] png, bool linear)
+    {
+        if (png == null || png.Length == 0)
+            return null;
+
+        var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false, linear);
+        if (!tex.LoadImage(png))
+        {
+            Destroy(tex);
+            return null;
+        }
+
+        tex.filterMode = FilterMode.Bilinear;
+        tex.wrapMode = TextureWrapMode.Repeat;
+        return tex;
     }
 
     #endregion
@@ -1444,27 +1453,29 @@ public class UIController : MonoBehaviour
     }
 
     /// <summary>
-    /// 载入地图时读取该地图自身的地轴倾角（地图元数据），
-    /// 并同步到滑动条与地球。
+    /// 应用地图自身的属性（地轴倾角、水面占比），并同步到滑动条与地球。
+    /// 参数改成 <see cref="MapData"/> 契约：这些值已经在载入时从 meta 读好，
+    /// 这里不再自己读一遍文件。
     /// </summary>
-    private void ApplyMapProperties(string mapBaseName)
+    private void ApplyMapProperties(MapData map)
     {
-        MapMetaData meta = MapMetaData.Load(mapBaseName);
+        if (map == null)
+            return;
 
-        float tilt = meta != null ? meta.axialTilt : MapMetaData.DefaultAxialTilt;
+        float tilt = MapMetaData.ClampAxialTilt(map.axialTilt);
         SetTiltSliderValue(tilt);
         ApplyAxialTiltToEarth(tilt);
 
-        if (meta != null && _waterSlider != null)
+        if (_waterSlider != null)
         {
             _waterSlider.SetValueWithoutNotify(
-                Mathf.Clamp(meta.waterCoverage, _waterSlider.lowValue, _waterSlider.highValue));
+                Mathf.Clamp(map.waterCoverage, _waterSlider.lowValue, _waterSlider.highValue));
             if (_waterValue != null)
                 _waterValue.text = $"{_waterSlider.value * 100:F0}%";
         }
 
-        if (meta != null)
-            Debug.Log($"Loaded map properties from '{mapBaseName}': axialTilt={tilt:F1}°");
+        Debug.Log($"已应用地图属性 '{map.baseName}'：axialTilt={tilt:F1}°，" +
+                  $"waterCoverage={map.waterCoverage * 100:F1}%");
     }
 
     #endregion

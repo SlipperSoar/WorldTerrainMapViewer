@@ -29,13 +29,13 @@ namespace WorldTerrain
 
         // ── 湿度带边界（0-1，与 ClimateModel 的湿度场同量纲）──
         /// <summary>低于此值算极端干旱：沙漠 / 戈壁。</summary>
-        public const double AridMax = 0.02;
+        public const double AridMax = 0.05;
 
         /// <summary>半干旱上限：干草原 / 稀树草原。</summary>
-        public const double SemiAridMax = 0.10;
+        public const double SemiAridMax = 0.30;
 
         /// <summary>半湿润上限：草原；以上算湿润（森林）。</summary>
-        public const double SubHumidMax = 0.22;
+        public const double SubHumidMax = 0.50;
 
         // ── 沼泽（湿地）──
         /// <summary>形成沼泽所需的最低湿度。</summary>

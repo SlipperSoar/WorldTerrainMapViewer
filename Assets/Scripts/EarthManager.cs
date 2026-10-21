@@ -189,6 +189,12 @@ public class EarthManager : MonoBehaviour
     public float PlanetRadiusKm { get; private set; } = PlanetProfile.ReferenceRadiusKm;
 
     /// <summary>
+    /// 星球在世界空间里的半径（场景单位）。供阳光箭头、标记等按星球大小自适应的物件使用。
+    /// </summary>
+    public float PlanetWorldRadius =>
+        earthRenderer != null ? earthRenderer.bounds.extents.x : 0f;
+
+    /// <summary>
     /// 设置星球半径（km），按地球半径为 1.0 倍缩放星球本身。
     ///
     /// 只改 <c>earthRenderer</c> 的 localScale：

@@ -61,6 +61,12 @@ namespace WorldTerrain
         /// <summary>[气候] 最终的湿度场（0-1）。侵蚀与水文都依赖它。</summary>
         public float[] Moisture;
 
+        /// <summary>
+        /// 群系判定用的湿度场（海面蒸发 + 副热带下沉只压陆地）。
+        /// 与 <see cref=Moisture/> 分开：后者参与侵蚀/水文，改动会改地形。
+        /// </summary>
+        public float[] BiomeMoisture;
+
         /// <summary>[水文] 河道、湖泊、三角洲等掩膜。</summary>
         public HydrologyData Hydrology;
 

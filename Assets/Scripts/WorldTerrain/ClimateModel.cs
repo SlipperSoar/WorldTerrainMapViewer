@@ -208,6 +208,45 @@ namespace WorldTerrain
         }
 
         /// <summary>
+        /// 海面**蒸发**供给的水汽（0-1）—— 与 <see cref="SeaSourceMoisture"/> 的区别很关键。
+        ///
+        /// 后者是「降水型」曲线：副热带下沉气流把那里的降水压到 0.04。但**海洋本身照样在蒸发**，
+        /// 副热带的干旱来自下沉气流抑制成云致雨，而不是海水没有水汽。
+        /// 把两者混为一谈会导致一个明显的错误：副热带纬度上的**岛屿与海岸**也会被判成荒漠
+        /// （实测该纬度带海洋湿度中位数只有 0.040，任何陆地从海岸往内一步就掉到 0.02 以下）。
+        ///
+        /// 所以海面供给用一条平缓的曲线（水汽含量由蒸发决定，随纬度变化温和），
+        /// 副热带的干燥改由 <see cref="SubsidenceFactor"/> 单独施加在陆地上。
+        /// </summary>
+        public static double SeaSurfaceMoisture(double absLat, double axialTiltDeg = 23.44)
+        {
+            double lat = Math.Abs(absLat);
+            double tilt = Math.Max(0.0, Math.Min(90.0, axialTiltDeg));
+            double tiltWeight = 1.0 + (tilt - 23.44) / 90.0;   // 倾角越大，暖水带越宽
+
+            double v = 0.62
+                     + Gaussian(lat, 5.0, 22.0) * 0.22 * tiltWeight      // 赤道暖池
+                     + Gaussian(lat, 45.0, 14.0) * 0.10                  // 西风带风暴轴
+                     - Gaussian(lat, 90.0, 26.0) * 0.22;                 // 极地冷水
+
+            return v < 0.30 ? 0.30 : (v > 0.95 ? 0.95 : v);
+        }
+
+        /// <summary>
+        /// 副热带下沉气流的干燥系数（0.38~1.0）：只施加在**陆地**上。
+        /// 峰值在 ±(30° + 倾角偏移)，与风带中心的季节摆动一致。
+        /// </summary>
+        public static double SubsidenceFactor(double latDeg, double axialTiltDeg = 23.44)
+        {
+            double tilt = Math.Max(0.0, Math.Min(90.0, axialTiltDeg));
+            double center = 30.0 + 0.25 * (tilt - 23.44);
+            double band = Gaussian(latDeg, center, 11.0) + Gaussian(latDeg, -center, 11.0);
+            if (band > 1.0)
+                band = 1.0;
+            return 1.0 - 0.62 * band;
+        }
+
+        /// <summary>
         /// 盛行风带的风向（单位向量；x 向东为正，y 向南为正，与图像行方向一致）：
         /// 信风（0-30°）吹向赤道、西风带（30-60°）吹向极地、极地东风（60-90°）吹向极地锋。
         /// 三条带之间用平滑过渡（sigmoid）衔接，而不是在 30°/60° 硬切换 ——
@@ -248,6 +287,30 @@ namespace WorldTerrain
         public static float[] ComputeMoistureField(int width, int height, float[] heightField,
             SeededNoise noise, double axialTilt = 23.44, Action<float> onProgress = null)
         {
+            return ComputeMoistureCore(width, height, heightField, noise, axialTilt,
+                onProgress, maritime: false);
+        }
+
+        /// <summary>
+        /// 供**生物群系判定**使用的湿度场。
+        ///
+        /// 与 <see cref=ComputeMoistureField/> 的差别只有两点：
+        ///   1. 起点取「海面蒸发」供给（平缓曲线），而不是降水型曲线
+        ///   2. 副热带下沉只压陆地（<see cref=SubsidenceFactor/>）
+        ///
+        /// 这样副热带的**岛屿与海岸**不再被判成荒漠 —— 它们周围全是暖湿海面。
+        /// 地形 / 水文 / 侵蚀仍使用原来的降水型湿度场，所以地形数值不受影响。
+        /// </summary>
+        public static float[] ComputeBiomeMoistureField(int width, int height, float[] heightField,
+            SeededNoise noise, double axialTilt = 23.44, Action<float> onProgress = null)
+        {
+            return ComputeMoistureCore(width, height, heightField, noise, axialTilt,
+                onProgress, maritime: true);
+        }
+
+        private static float[] ComputeMoistureCore(int width, int height, float[] heightField,
+            SeededNoise noise, double axialTilt, Action<float> onProgress, bool maritime)
+        {
             int w = width, h = height, n = w * h;
             float[] field = new float[n];
 
@@ -255,7 +318,9 @@ namespace WorldTerrain
             onProgress?.Invoke(0.02f);
             float[] annualProfile = AnnualMoistureProfile(h, axialTilt);
 
-            // 预置：海面与陆地都先取该纬度的全年平均水汽，保证任何下风采样都有效
+            // 预置：海面与陆地都先取该纬度**海面蒸发**供给的水汽，保证任何下风采样都有效。
+            // 这里不能再用降水型曲线（见 SeaSurfaceMoisture 的注释）：
+            // 副热带降水虽被下沉气流压干，海洋本身仍在蒸发，否则纬度带上的岛屿会整片变荒漠。
             double[] rowCosLat = new double[h];
             double[] rowSinLat = new double[h];
             for (int y = 0; y < h; y++)
@@ -269,7 +334,10 @@ namespace WorldTerrain
             // 因为下风行必须读到上风行的结果
             Parallelism.ForRows(h, y =>
             {
-                float src = (float)annualProfile[y];
+                double latDeg = 90.0 - (double)y / (h - 1) * 180.0;
+                float src = maritime
+                    ? (float)SeaSurfaceMoisture(Math.Abs(latDeg), axialTilt)
+                    : annualProfile[y];
                 int row = y * w;
                 for (int x = 0; x < w; x++)
                     field[row + x] = src;
@@ -324,7 +392,37 @@ namespace WorldTerrain
             // 极点是一整行同一个点：把极圈行取平均，避免出现横向条纹
             AveragePoleRows(w, h, field);
 
+            // 副热带下沉气流：只压陆地，不压海面。
+            // 放在推进之后做一次，避免沿路径反复相乘把整条纬度带抽干。
+            // 只在群系湿度场启用：地形侧的降水型场已经用降水曲线表达了副热带干旱，
+            // 再乘一次会把那一带彻底抽干（地形基线也会变）。
+            if (maritime)
+                ApplySubsidence(w, h, heightField, field, axialTilt);
+
             return field;
+        }
+
+        /// <summary>
+        /// 把副热带下沉的干燥系数施加到**陆地**格上（海面保持蒸发值）。
+        /// 这是「副热带是沙漠带」与「副热带海洋仍然湿润」两件事的分离点。
+        /// </summary>
+        private static void ApplySubsidence(int w, int h, float[] heightField, float[] field,
+            double axialTilt)
+        {
+            Parallelism.ForRows(h, y =>
+            {
+                double latDeg = 90.0 - (double)y / (h - 1) * 180.0;
+                double factor = SubsidenceFactor(latDeg, axialTilt);
+                int row = y * w;
+                for (int x = 0; x < w; x++)
+                {
+                    int i = row + x;
+                    if (heightField[i] <= 0f)
+                        continue;
+                    double v = field[i] * factor;
+                    field[i] = (float)(v < 0.0 ? 0.0 : v);
+                }
+            });
         }
 
         /// <summary>双线性采样（x 环绕、y 钳制），用于上风点插值。</summary>

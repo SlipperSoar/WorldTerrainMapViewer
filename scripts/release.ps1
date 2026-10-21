@@ -69,6 +69,25 @@ function Step([string]$text) { Write-Host ""; Write-Host "=== $text ===" -Foregr
 function Info([string]$text) { Write-Host "  $text" }
 function Fail([string]$text) { Write-Host "  ERROR: $text" -ForegroundColor Red; exit 1 }
 
+# Run git and return its exit code.
+#
+# Why a helper: git writes progress ("To https://...", "* [new tag]") to stderr.
+# Under $ErrorActionPreference='Stop', PowerShell 5.1 turns any native stderr line
+# into a terminating NativeCommandError -- so `git push 2>&1 | Out-Null` still
+# aborts the script. Locally relaxing the preference around the call is the only
+# reliable way; the exit code remains the source of truth.
+function Invoke-Git {
+    param([Parameter(Mandatory = $true)][string[]]$GitArgs)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & git @GitArgs 2>&1 | Out-Null
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
 # ---- 1. preflight ---------------------------------------------------------
 Step "Preflight"
 Info "repo    : $Repo ($Branch)"
@@ -201,14 +220,12 @@ Info "zip: $ZipPath ($zipMb MB)"
 # ---- 5. commit ------------------------------------------------------------
 if (-not $SkipCommit) {
     Step "Commit"
-    # git writes progress to stderr; with $ErrorActionPreference='Stop' that surfaces
-    # as a NativeCommandError. Silence it and judge by $LASTEXITCODE instead.
-    git add -A 2>&1 | Out-Null
+    Invoke-Git @("add", "-A") | Out-Null
     $staged = (git diff --cached --name-only)
     if ($staged) {
         Info ("staged files: " + ($staged | Measure-Object).Count)
-        git commit -m "release: $Tag" 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { Fail "git commit failed" }
+        $code = Invoke-Git @("commit", "-m", "release: $Tag")
+        if ($code -ne 0) { Fail "git commit failed" }
         Info "committed"
     } else {
         Info "nothing to commit"
@@ -221,18 +238,18 @@ $existingTag = (git tag --list $Tag)
 if ($existingTag) {
     Info "tag already exists"
 } else {
-    git tag -a $Tag -m "Release $Tag" 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { Fail "git tag failed" }
+    $code = Invoke-Git @("tag", "-a", $Tag, "-m", "Release $Tag")
+    if ($code -ne 0) { Fail "git tag failed" }
     Info "tag created"
 }
 
 # ---- 7. push --------------------------------------------------------------
 if (-not $SkipPush) {
     Step "Push"
-    git push origin $Branch 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { Fail "push branch failed" }
-    git push origin $Tag 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { Fail "push tag failed" }
+    $code = Invoke-Git @("push", "origin", $Branch)
+    if ($code -ne 0) { Fail "push branch failed" }
+    $code = Invoke-Git @("push", "origin", $Tag)
+    if ($code -ne 0) { Fail "push tag failed" }
     Info "pushed $Branch and $Tag"
 }
 

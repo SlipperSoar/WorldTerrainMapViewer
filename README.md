@@ -551,3 +551,50 @@ Unity 的托管堆把内存还给 GC 之后**不会再把页还给操作系统**
 
 各节正文里也会在需要过程数据处直接链到对应小节。
 
+### 发布流程（打标签 → 出 Windows 包 → 上传 Release）
+
+每次版本更新走同一条命令，一次完成 **构建 → 提交 → 打标签 → 推送 → 打包 → 上传 Release**：
+
+```powershell
+./scripts/release.ps1 -Version 2.2.0 -NotesFile release-notes/V2.2.0.md
+```
+
+约定：
+
+| 项 | 值 |
+|---|---|
+| 标签 | `V<版本>`（如 `V2.2.0`） |
+| Release 标题 | `Release <yyyy.MM.dd> V<版本>` |
+| 资产名 | `WorldTerrainMapViewer.zip`（解压即为可直接运行的 Windows 程序） |
+| 发布说明 | `release-notes/V<版本>.md`（UTF-8，随仓库保存） |
+
+脚本行为要点：
+
+- **先构建、后打标签**：构建失败不会留下一个没有产物的标签
+- **构建前先单独跑一次编译检查**（`WindowsBuild.CheckCompile`），
+  编译不通就直接失败，绝不产出「编的是旧程序集」的假成功包
+- 顺带把 `ProjectSettings` 的 `bundleVersion` 改成版本号，产物属性里能看到
+- 复用 Git Credential Manager 里已存的 token（也可用 `-Token` 或 `GITHUB_TOKEN` 覆盖）
+- 可用 `-SkipCommit` / `-SkipPush` / `-SkipBuild` / `-SkipRelease` 只跑其中几步
+
+构建入口在 `Assets/Editor/WindowsBuild.cs`，也可以直接命令行调用：
+
+```
+Tuanjie.exe -batchmode -nographics -quit -projectPath <仓库> ^
+    -executeMethod WindowsBuild.Build -buildTarget StandaloneWindows64 -logFile -
+```
+
+#### 自动出包（GitHub Actions）
+
+`.github/workflows/release.yml` 在推送 `V*` 标签时自动构建并上传到该标签的 Release。
+
+> **必须用 self-hosted runner。** GitHub 托管的 runner 里没有团结引擎（Tuanjie），
+> 而本项目只能用 Tuanjie 2022.3.62t11 构建；引擎安装包数 GB 且需要激活，
+> 无法在托管 runner 上现装现用。所以需要一台装了 Tuanjie 的 Windows 机器注册成 runner：
+>
+> ```
+> ./config.cmd --url https://github.com/<owner>/<repo> --token <TOKEN> --labels tuanjie,windows
+> ```
+>
+> 引擎路径不是默认值时，在仓库 Variables 里设置 `TUANJIE_EDITOR`。
+

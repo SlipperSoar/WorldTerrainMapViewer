@@ -69,7 +69,8 @@ jobs:
       - name: Upload to GitHub Release
         shell: pwsh
         run: |
-          # 复用同一个脚本的「创建 Release + 上传资产」段；构建已完成，跳过前三步
+          # 复用同一个脚本的「创建 Release + 上传资产」段；构建已完成，跳过其余步骤。
+          # -AllowDirty 必须给：上一步可能改过 bundleVersion，工作区不再干净。
           ./scripts/release.ps1 -Version $env:TAG -SkipCommit -SkipPush -SkipBuild -AllowDirty -Token $env:GITHUB_TOKEN
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

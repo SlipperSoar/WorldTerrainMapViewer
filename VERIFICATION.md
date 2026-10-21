@@ -20,6 +20,7 @@
 - [13. 生成分辨率档位](#13-生成分辨率档位)
 - [14. 内存占用排查](#14-内存占用排查)
 - [15. 星球大小与自转方向](#15-星球大小与自转方向)
+- [16. 发布流水线](#16-发布流水线)
 
 ---
 
@@ -1039,6 +1040,86 @@ dotnet build planetcheck.csproj -c Release
 旧标记不会跟着移动（新放置的标记会用新半径）。这不是本次引入的问题，
 而是「标记位置是绝对坐标」的既有设计；要修需要把标记存成 UV 并每帧重新投影。
 
+---
+
+## 16. 发布流水线
+
+### 16.1 一条命令做什么
+
+`scripts/release.ps1` 按顺序执行：
+
+```
+预检 → 改 bundleVersion → 编译检查 → 构建 Windows 播放器 → 打包 zip
+     → 提交 → 打标签 → 推送 → 创建 Release → 上传资产
+```
+
+关键顺序决策：**构建在打标签之前**。反过来的话，构建一旦失败就会留下一个
+「有标签但没有产物」的版本，事后很难收拾。
+
+### 16.2 构建入口
+
+`Assets/Editor/WindowsBuild.cs` 提供两个 `-executeMethod` 入口：
+
+| 入口 | 作用 | 成功判定 |
+|---|---|---|
+| `WindowsBuild.CheckCompile` | 只检查脚本是否编译通过 | 打印 `COMPILE_OK` 且退出码 0 |
+| `WindowsBuild.Build` | 构建 StandaloneWindows64 | 打印 `BUILD_OK <exe> <字节数>` 且退出码 0 |
+
+输出目录默认 `Build/`（与历史产物位置一致），可用环境变量 `WTMV_BUILD_DIR` 覆盖。
+
+### 16.3 踩过的两个坑（都已修）
+
+**坑一：构建"成功"但可能编的是旧程序集。**
+
+新增 `.cs` 后第一次 `-batchmode` 打开工程，Unity 的首次编译可能早于新文件入库，
+日志里出现一片 `CS0103`，随后它自己又补了一遍编译并继续构建 —— 于是「构建成功」，
+日志里却带着编译错误，分不清编的是新代码还是旧程序集。
+
+修法：`CheckCompile` 与 `Build` 都先看 `EditorUtility.scriptCompilationFailed`，
+编译不通直接以退出码 1 结束；发布脚本在构建前先单独跑一次 `CheckCompile`。
+修正后一次实测：`error CS` **0 条**，`COMPILE_OK` 正常。
+
+**坑二：PowerShell 5.1 把无 BOM 的 UTF-8 脚本按 ANSI 读。**
+
+脚本里写中文注释后，一行注释被解析成乱码，并且把**下一行的 `$checkLog = ...` 赋值吞进了注释**，
+于是 `$checkLog` 为 `null`，`Test-Path $checkLog` 报
+`Cannot bind argument to parameter 'Path' because it is null`。
+
+阴险之处在于**语法检查仍然通过**（注释内容不影响解析），只靠 `Parser::ParseFile` 查不出来。
+
+修法：脚本**保持纯 ASCII**（中文只放 `release-notes/*.md`，用 `ReadAllText` 显式按 UTF-8 读）；
+提交前额外确认两件事：逐字节无非 ASCII、关键赋值独立成行。
+
+### 16.4 另外两个修正
+
+- **Release body 变成对象**：`Get-Content -Raw` 返回的字符串带 `PSPath`/`PSDrive` 等
+  note 属性，`ConvertTo-Json` 会把它序列化成对象而不是字符串，GitHub 返回 **422**。
+  改用 `[System.IO.File]::ReadAllText(...)`。
+- **退出码误判**：`git` 把进度写到 stderr，在 `$ErrorActionPreference='Stop'` 下会变成
+  `NativeCommandError`，脚本虽然跑完但退出码为 1，CI 会误判失败。
+  改为 `2>&1 | Out-Null` 并用 `$LASTEXITCODE` 判定，末尾显式 `exit 0`。
+
+### 16.5 V2.2.0 实测
+
+| 项 | 结果 |
+|---|---|
+| 编译检查 | `COMPILE_OK`，`error CS` 0 条 |
+| 构建 | 150 个文件，134.4 MB，耗时 2 s，退出码 0 |
+| 产物校验 | `Assembly-CSharp.dll` 内含 `PlanetProfile` / `SetPlanetRadiusKm` / `SetRotationDirection` / `SetPlanetScale` / `MaxAllowedWidth` |
+| 打包 | `dist/WorldTerrainMapViewer.zip`，45.3 MB |
+| 标签 | `V2.2.0` |
+| Release | 已创建并上传资产，下载链接可用 |
+
+### 16.6 自动出包的限制
+
+GitHub 托管的 runner **无法**构建本项目：目标引擎是团结引擎（Tuanjie 2022.3.62t11），
+安装包数 GB 且需要激活，不可能在托管 runner 上现装现用。
+因此 `.github/workflows/release.yml` 指定 `runs-on: [self-hosted, windows, tuanjie]`，
+需要一台装了 Tuanjie 的 Windows 机器注册为 runner。
+
+---
+
+## 附：不当作基线的历史数值
 
 以下数值出现在早期记录里，因为算法改动而**不再有效**，列出仅供追溯：
 

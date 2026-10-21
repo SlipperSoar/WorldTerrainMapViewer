@@ -199,11 +199,13 @@ Info "zip: $ZipPath ($zipMb MB)"
 # ---- 5. commit ------------------------------------------------------------
 if (-not $SkipCommit) {
     Step "Commit"
-    git add -A
+    # git writes progress to stderr; with $ErrorActionPreference='Stop' that surfaces
+    # as a NativeCommandError. Silence it and judge by $LASTEXITCODE instead.
+    git add -A 2>&1 | Out-Null
     $staged = (git diff --cached --name-only)
     if ($staged) {
         Info ("staged files: " + ($staged | Measure-Object).Count)
-        git commit -m "release: $Tag" | Out-Null
+        git commit -m "release: $Tag" 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { Fail "git commit failed" }
         Info "committed"
     } else {
@@ -217,7 +219,7 @@ $existingTag = (git tag --list $Tag)
 if ($existingTag) {
     Info "tag already exists"
 } else {
-    git tag -a $Tag -m "Release $Tag"
+    git tag -a $Tag -m "Release $Tag" 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "git tag failed" }
     Info "tag created"
 }
@@ -225,9 +227,9 @@ if ($existingTag) {
 # ---- 7. push --------------------------------------------------------------
 if (-not $SkipPush) {
     Step "Push"
-    git push origin $Branch
+    git push origin $Branch 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "push branch failed" }
-    git push origin $Tag
+    git push origin $Tag 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "push tag failed" }
     Info "pushed $Branch and $Tag"
 }
@@ -285,3 +287,4 @@ Info "download: $($result.browser_download_url)"
 
 Write-Host ""
 Write-Host "Release $Tag done." -ForegroundColor Green
+exit 0

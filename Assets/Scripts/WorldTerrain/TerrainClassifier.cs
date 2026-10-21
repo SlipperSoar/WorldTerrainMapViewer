@@ -38,6 +38,10 @@ namespace WorldTerrain
             // Step 5a: Compute distance-to-sea field (BFS from all ocean pixels)
             int[] seaDist = ClimateModel.SeaDistance(w, h, heightField);
 
+            // Step 5a2: 坡度场（m/km）。沼泽要「排水不畅」、戈壁要「存不住沙」，
+            // 两者都靠坡度区分，不能用海拔代替。
+            float[] slope = ComputeSlopeMetersPerKm(w, h, heightField);
+
             // Step 5b: 雪线标定基准 —— 本地图最高的陆地海拔。
             // 经验公式给出的是真实海拔（赤道约 5 km），而生成地图的起伏通常只有
             // 1~2 km，因此按「地图最高陆地海拔 / 地球最高陆地海拔」等比标定，
@@ -140,12 +144,58 @@ namespace WorldTerrain
                     }
 
                     // ── Step 5: Land classification ──
-                    // 湿度已在上面（冰盖判定前）算好，陆地分类直接复用
-                    types[idx] = ClassifyLand(elev, absLat, moisture, seaDist[idx]);
+                    // 气候优先：先按海拔把海平面气温递减到本地高度，再交给
+                    // BiomeModel 用「气温带 × 湿度带 + 坡度」判定群系。
+                    // 湿度已在上面（冰盖判定前）算好，陆地分类直接复用。
+                    double seaLevelTemp =
+                        PolarClimate.SeaLevelSummerTemperature(absLat, axialTilt);
+                    double localTemp =
+                        PolarClimate.TemperatureAtElevation(seaLevelTemp, elev);
+
+                    types[idx] = BiomeModel.Classify(
+                        localTemp, moisture, elev, slope[idx], seaDist[idx], absLat);
                 }
             }
 
             return types;
+        }
+
+        /// <summary>
+        /// 坡度场：每个格子的地面梯度（米 / 公里）。
+        ///
+        /// 东西向按纬度缩小格距（高纬同样 1 像素代表的距离更短，坡度更大），
+        /// 极点附近给余弦设下限，避免除零。
+        /// </summary>
+        private static float[] ComputeSlopeMetersPerKm(int w, int h, float[] heightField)
+        {
+            float[] slope = new float[w * h];
+            if (w < 3 || h < 3)
+                return slope;
+
+            // 赤道处每像素的东向距离（km）；360° × 111.32 km
+            double cellKm = 40075.0 / w;
+
+            Parallelism.ForRows(h, y =>
+            {
+                double lat = 90.0 - (double)y / (h - 1) * 180.0;
+                double cosLat = Math.Max(0.15, Math.Cos(lat * Math.PI / 180.0));
+                double dxKm = cellKm * cosLat;
+                int yu = Math.Max(0, y - 1);
+                int yd = Math.Min(h - 1, y + 1);
+
+                for (int x = 0; x < w; x++)
+                {
+                    int xl = (x - 1 + w) % w;
+                    int xr = (x + 1) % w;
+
+                    double dhx = (heightField[y * w + xr] - heightField[y * w + xl]) / (2.0 * dxKm);
+                    double dhy = (heightField[yd * w + x] - heightField[yu * w + x]) / (2.0 * cellKm);
+
+                    slope[y * w + x] = (float)Math.Sqrt(dhx * dhx + dhy * dhy);
+                }
+            });
+
+            return slope;
         }
 
         /// <summary>
@@ -166,66 +216,7 @@ namespace WorldTerrain
 
         // ── Private helpers ──
 
-        /// <summary>
-        /// Classify land terrain based on elevation, latitude, and moisture.
-        /// </summary>
-        private static TerrainType ClassifyLand(
-            float elev, double absLat, double moisture, int seaDist)
-        {
-            // Snow peak (highest mountains)
-            if (elev > 7000f)
-                return TerrainType.SnowPeak;
-
-            // High mountain
-            if (elev > 4000f)
-                return TerrainType.HighMountain;
-
-            // Mountain
-            if (elev > 3000f)
-                return TerrainType.Mountain;
-
-            // Desert (low moisture, subtropical)
-            if (elev < 2000f && moisture < 0.3 && absLat > 10 && absLat < 40)
-                return TerrainType.Desert;
-
-            // Gobi (low moisture, mid-latitude continental interior)
-            if (elev > 1000f && elev < 3000f && moisture < 0.25 && absLat > 35 && absLat < 55)
-                return TerrainType.Gobi;
-
-            // Tundra (high latitude)
-            if (elev < 1500f && absLat > 55)
-                return TerrainType.Tundra;
-
-            // Rainforest (high moisture, equatorial)
-            if (elev < 1000f && moisture > 0.65 && absLat < 15)
-                return TerrainType.Rainforest;
-
-            // Desert plateau (low moisture, high elevation)
-            if (elev > 2000f && elev <= 4000f && moisture < 0.2)
-                return TerrainType.Gobi;
-
-            // Plateau
-            if (elev > 2000f && elev <= 3000f)
-                return TerrainType.Plateau;
-
-            // Highland
-            if (elev > 1000f && elev <= 2000f)
-                return TerrainType.Highland;
-
-            // Hills
-            if (elev > 500f && elev <= 1000f)
-                return TerrainType.Hills;
-
-            // Forest (moderate moisture, low-mid elevation)
-            if (elev > 200f && elev <= 500f && moisture > 0.5)
-                return TerrainType.Forest;
-
-            // Grassland
-            if (elev > 200f && elev <= 500f)
-                return TerrainType.Grassland;
-
-            // Coast / lowland
-            return TerrainType.Coast;
-        }
+        // 陆地群系判定已移到 BiomeModel（纯函数、可独立测试），
+        // 这里只保留需要邻居信息的坡度场计算（见 ComputeSlopeMetersPerKm）。
     }
 }

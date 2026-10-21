@@ -54,8 +54,11 @@ namespace WorldTerrain
         }
 
         /// <summary>
-        /// Step 7: Render the color terrain map using continuous elevation mapping.
-        /// Ocean depth uses noise-varied gradients; land uses meter-based thresholds.
+        /// Step 7: Render the color terrain map。
+        ///
+        /// 陆地按**生物群系**着色（森林/沙漠/戈壁/草原/沼泽…，由 <see cref="BiomeModel"/> 判定），
+        /// 再叠加起伏阴影与细颗粒噪声；不再用「海拔 → 颜色」的单一渐变。
+        /// 海洋深度、冰盖、河流、湖泊的着色保持不变。
         /// </summary>
         public static Color32[] RenderTerrainMap(
             int width, int height, float[] heightField,
@@ -63,6 +66,7 @@ namespace WorldTerrain
             SeededNoise noise)
         {
             Color32[] colors = new Color32[width * height];
+            float[] relief = BuildReliefShade(width, height, heightField);
 
             for (int y = 0; y < height; y++)
             {
@@ -73,11 +77,93 @@ namespace WorldTerrain
                         heightField[i], terrainTypes[i],
                         hydrology.riverWidth[i],
                         hydrology.estuaryMask[i],
+                        relief[i],
                         x, y, width, height, noise));
                 }
             }
 
             return colors;
+        }
+
+        /// <summary>
+        /// 起伏阴影：用高度场的局部梯度模拟「西北向光照」，让群系色块有立体感。
+        /// 以全图最大梯度归一化，返回 0.88~1.12 的亮度系数（海洋不参与，按 1 处理）。
+        /// </summary>
+        private static float[] BuildReliefShade(int width, int height, float[] heightField)
+        {
+            float[] relief = new float[width * height];
+            if (width < 3 || height < 3)
+            {
+                for (int i = 0; i < relief.Length; i++)
+                    relief[i] = 1f;
+                return relief;
+            }
+
+            // 归一化尺度取**陆地梯度的 95 分位**，而不是全图最大值：
+            // 海岸线上几千米的落差会把最大值顶到天上，导致内陆的起伏全被压成 0，
+            // 整张图看起来是平的（这是实测踩到的坑）。
+            var samples = new System.Collections.Generic.List<float>(height / 2 + 1);
+            for (int y = 0; y < height; y++)
+            {
+                int yu = Math.Max(0, y - 1);
+                int yd = Math.Min(height - 1, y + 1);
+                for (int x = 0; x < width; x++)
+                {
+                    int i = y * width + x;
+                    if (heightField[i] <= 0f)
+                        continue;
+                    int xl = (x - 1 + width) % width;
+                    int xr = (x + 1) % width;
+                    float gx = heightField[y * width + xr] - heightField[y * width + xl];
+                    float gy = heightField[yd * width + x] - heightField[yu * width + x];
+                    samples.Add(Math.Abs(gx) + Math.Abs(gy));
+                }
+            }
+
+            float maxGrad = 1f;
+            if (samples.Count > 0)
+            {
+                samples.Sort();
+                maxGrad = samples[Math.Min(samples.Count - 1, (int)(samples.Count * 0.95f))];
+                if (maxGrad <= 0f)
+                    maxGrad = 1f;
+            }
+
+            if (maxGrad <= 0f)
+            {
+                for (int i = 0; i < relief.Length; i++)
+                    relief[i] = 1f;
+                return relief;
+            }
+
+            const float Strength = 0.30f;
+            for (int y = 0; y < height; y++)
+            {
+                int yu = Math.Max(0, y - 1);
+                int yd = Math.Min(height - 1, y + 1);
+                for (int x = 0; x < width; x++)
+                {
+                    int i = y * width + x;
+                    if (heightField[i] <= 0f)
+                    {
+                        relief[i] = 1f;
+                        continue;
+                    }
+
+                    int xl = (x - 1 + width) % width;
+                    int xr = (x + 1) % width;
+                    float gx = heightField[y * width + xr] - heightField[y * width + xl];
+                    float gy = heightField[yd * width + x] - heightField[yu * width + x];
+
+                    // 方向项：光照来自西北，坡面朝西北变亮、朝东南变暗
+                    float d = (gy - gx) / maxGrad * Strength;
+                    // 坡度项：越陡越暗，让山脊与谷地在纯色群系上也能看出来
+                    float slopeNorm = Math.Min(1f, (Math.Abs(gx) + Math.Abs(gy)) / maxGrad);
+                    relief[i] = Math.Max(0.72f, Math.Min(1.24f, 1f + d - slopeNorm * 0.16f));
+                }
+            }
+
+            return relief;
         }
 
         /// <summary>
@@ -180,56 +266,6 @@ namespace WorldTerrain
             return t * t * (3.0 - 2.0 * t);
         }
 
-        // ── Land color stops (elevation in meters) ──
-        // Orange/brown appears at 1500m so mountains are clearly visible
-
-        private struct LandStop
-        {
-            public double elev;
-            public double r, g, b;
-        }
-
-        private static readonly LandStop[] LAND_STOPS =
-        {
-            new LandStop { elev =    0, r = 0.40, g = 0.65, b = 0.35 },  // Shore green
-            new LandStop { elev =  300, r = 0.52, g = 0.70, b = 0.32 },  // Light green
-            new LandStop { elev =  800, r = 0.65, g = 0.65, b = 0.30 },  // Yellow-green
-            new LandStop { elev = 1500, r = 0.78, g = 0.58, b = 0.25 },  // Orange-tan
-            new LandStop { elev = 2500, r = 0.72, g = 0.48, b = 0.20 },  // Brown
-            new LandStop { elev = 4000, r = 0.58, g = 0.35, b = 0.15 },  // Dark brown
-            new LandStop { elev = 5000, r = 0.80, g = 0.80, b = 0.82 },  // Snow
-            new LandStop { elev =10000, r = 0.95, g = 0.95, b = 0.96 },  // Pure snow
-        };
-
-        /// <summary>
-        /// Continuous land elevation-to-color mapping using meter-based thresholds.
-        /// Orange/brown appears at 1500m so mountains are clearly visible.
-        /// </summary>
-        private static Color LandElevationToColor(float elevation)
-        {
-            double elev = (double)elevation;
-
-            for (int i = 0; i < LAND_STOPS.Length - 1; i++)
-            {
-                if (elev <= LAND_STOPS[i + 1].elev)
-                {
-                    var a = LAND_STOPS[i];
-                    var b = LAND_STOPS[i + 1];
-                    double t = (elev - a.elev) / (b.elev - a.elev);
-                    t = SmoothStep(t);
-
-                    return new Color(
-                        (float)(a.r + (b.r - a.r) * t),
-                        (float)(a.g + (b.g - a.g) * t),
-                        (float)(a.b + (b.b - a.b) * t),
-                        1f);
-                }
-            }
-
-            var last = LAND_STOPS[LAND_STOPS.Length - 1];
-            return new Color((float)last.r, (float)last.g, (float)last.b, 1f);
-        }
-
         /// <summary>
         /// Ocean depth-to-color mapping with noise-varied gradient slope.
         /// Shallow areas occupy a larger color range; deep ocean is the minority.
@@ -264,7 +300,7 @@ namespace WorldTerrain
         /// </summary>
         private static Color GetTerrainColor(
             float elevation, TerrainType type, float riverWidth,
-            bool isEstuary,
+            bool isEstuary, float relief,
             int x, int y, int w, int h, SeededNoise noise)
         {
             // Glacier: 陆地冰盖 / 高山冰川 —— 亮白偏冷色，随海拔增亮，
@@ -346,8 +382,72 @@ namespace WorldTerrain
             if (elevation <= 0f)
                 return OceanDepthToColor(elevation, x, y, w, h, noise);
 
-            // Land: meter-based continuous mapping
-            return LandElevationToColor(elevation);
+            // Land: 按生物群系着色（森林/沙漠/戈壁/草原/沼泽…），叠加起伏与颗粒
+            Vector3D lp = PlateTectonicsGenerator.PixelToSphere(x, y, w, h);
+            // 两个尺度的颗粒：细颗粒给纹理，粗颗粒让大片同色群系有深浅变化
+            double fine = noise.Noise3D(lp.x * 26.0, lp.y * 26.0, lp.z * 26.0) - 0.5;
+            double coarse = noise.Noise3D(lp.x * 7.0, lp.y * 7.0, lp.z * 7.0) - 0.5;
+            return BiomeColor(type, elevation, relief, (float)(fine * 0.07 + coarse * 0.05));
+        }
+
+        /// <summary>
+        /// 群系基色（0-1）。同一海拔下湿润区偏绿、干旱区偏黄褐，
+        /// 因此从颜色就能区分森林、草原、沙漠、戈壁等自然环境。
+        /// </summary>
+        private static Color BiomeBaseColor(TerrainType type)
+        {
+            switch (type)
+            {
+                case TerrainType.Coast:         return new Color(0.86f, 0.81f, 0.64f, 1f);
+                case TerrainType.Marsh:         return new Color(0.24f, 0.36f, 0.28f, 1f);
+                case TerrainType.Tundra:        return new Color(0.55f, 0.57f, 0.47f, 1f);
+                case TerrainType.AlpineMeadow:  return new Color(0.56f, 0.63f, 0.43f, 1f);
+                case TerrainType.BareRock:      return new Color(0.56f, 0.54f, 0.51f, 1f);
+                case TerrainType.ConiferForest: return new Color(0.14f, 0.31f, 0.22f, 1f);
+                case TerrainType.Forest:        return new Color(0.22f, 0.45f, 0.20f, 1f);
+                case TerrainType.Rainforest:    return new Color(0.09f, 0.34f, 0.14f, 1f);
+                case TerrainType.Savanna:       return new Color(0.66f, 0.62f, 0.30f, 1f);
+                case TerrainType.Grassland:     return new Color(0.50f, 0.62f, 0.28f, 1f);
+                case TerrainType.Steppe:        return new Color(0.74f, 0.70f, 0.42f, 1f);
+                case TerrainType.Desert:        return new Color(0.84f, 0.69f, 0.42f, 1f);
+                case TerrainType.Gobi:          return new Color(0.60f, 0.56f, 0.50f, 1f);
+
+                // 旧分类遗留的按海拔命名的类型：给中性色兜底
+                case TerrainType.Hills:         return new Color(0.40f, 0.50f, 0.28f, 1f);
+                case TerrainType.Highland:      return new Color(0.50f, 0.52f, 0.38f, 1f);
+                case TerrainType.Plateau:       return new Color(0.58f, 0.56f, 0.44f, 1f);
+                case TerrainType.Mountain:      return new Color(0.52f, 0.50f, 0.47f, 1f);
+                case TerrainType.HighMountain:  return new Color(0.60f, 0.60f, 0.60f, 1f);
+
+                default:                        return new Color(0.46f, 0.55f, 0.32f, 1f);
+            }
+        }
+
+        /// <summary>
+        /// 群系色 + 海拔提亮 + 起伏阴影 + 颗粒噪声。
+        ///
+        /// 海拔只负责“提亮并偏冷灰”（越高越像裸地），不再决定色相 ——
+        /// 色相完全由群系决定，所以森林与沙漠在同一海拔也能一眼分开。
+        /// </summary>
+        private static Color BiomeColor(TerrainType type, float elevation, float relief, float grain)
+        {
+            Color c = BiomeBaseColor(type);
+
+            float t = Math.Max(0f, Math.Min(1f, elevation / 6000f));
+            float lift = 0.20f * t;
+            c.r += (1f - c.r) * lift;
+            c.g += (1f - c.g) * lift;
+            c.b += (1f - c.b) * lift;
+
+            c.r = c.r * relief + grain;
+            c.g = c.g * relief + grain;
+            c.b = c.b * relief + grain;
+
+            return new Color(
+                Math.Max(0f, Math.Min(1f, c.r)),
+                Math.Max(0f, Math.Min(1f, c.g)),
+                Math.Max(0f, Math.Min(1f, c.b)),
+                1f);
         }
     }
 }

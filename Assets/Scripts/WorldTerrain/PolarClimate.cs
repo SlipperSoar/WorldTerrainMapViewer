@@ -83,6 +83,17 @@ namespace WorldTerrain
         }
 
         /// <summary>
+        /// 把海平面气温按海拔递减到给定高度（℃，最热月平均）。
+        /// 递减率见 <see cref="LapseRate"/>；雪线就是该值降到 0℃ 的高度。
+        /// </summary>
+        public static double TemperatureAtElevation(double seaLevelTemperature, double elevationMeters)
+        {
+            if (elevationMeters <= 0.0)
+                return seaLevelTemperature;
+            return seaLevelTemperature - elevationMeters / 1000.0 * LapseRate;
+        }
+
+        /// <summary>
         /// 雪线中值（米，公式原值）。返回 0 表示海平面即终年积雪。
         /// </summary>
         public static double SnowLineMedianElevation(double absLat, double axialTilt)

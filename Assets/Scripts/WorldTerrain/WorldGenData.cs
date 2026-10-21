@@ -117,7 +117,23 @@ namespace WorldTerrain
         /// <summary>季节性（间歇性）河流：集水区气候干旱，仅雨季有水</summary>
         SeasonalRiver,
         /// <summary>河口三角洲的分流河道与三角洲平原</summary>
-        Delta
+        Delta,
+
+        // ── 气候驱动的生物群系（由 BiomeModel 判定，见该类注释）──
+        // 追加在末尾：已有成员的数值不变，避免影响已保存的数据。
+
+        /// <summary>沼泽 / 湿地：低洼、平缓、极湿（也偏冷的地方排水不畅）</summary>
+        Marsh,
+        /// <summary>针叶林：冷温带湿润区（最热月 7~12℃）</summary>
+        ConiferForest,
+        /// <summary>稀树草原：热带半干旱/半湿润区</summary>
+        Savanna,
+        /// <summary>干草原：温带半干旱区</summary>
+        Steppe,
+        /// <summary>裸岩 / 高山荒漠：林线以上、雪线以下的干旱地带</summary>
+        BareRock,
+        /// <summary>高山草甸：林线以上、雪线以下的湿润地带</summary>
+        AlpineMeadow
     }
 
     /// <summary>

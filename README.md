@@ -640,17 +640,22 @@ Tuanjie.exe -batchmode -nographics -quit -projectPath <仓库> ^
     -executeMethod WindowsBuild.Build -buildTarget StandaloneWindows64 -logFile -
 ```
 
-#### 自动出包（GitHub Actions）
+#### 只在本地发布
 
-`.github/workflows/release.yml` 在推送 `V*` 标签时自动构建并上传到该标签的 Release。
+发布**不使用任何 CI / GitHub Runner**：构建需要团结引擎（Tuanjie 2022.3.62t11），
+它装在本地这台机器上，托管 runner 里没有、也装不上（数 GB 且需要激活）。
+因此整个流程都由 `scripts/release.ps1` 在本地一次跑完：
 
-> **必须用 self-hosted runner。** GitHub 托管的 runner 里没有团结引擎（Tuanjie），
-> 而本项目只能用 Tuanjie 2022.3.62t11 构建；引擎安装包数 GB 且需要激活，
-> 无法在托管 runner 上现装现用。所以需要一台装了 Tuanjie 的 Windows 机器注册成 runner：
->
-> ```
-> ./config.cmd --url https://github.com/<owner>/<repo> --token <TOKEN> --labels tuanjie,windows
-> ```
->
-> 引擎路径不是默认值时，在仓库 Variables 里设置 `TUANJIE_EDITOR`。
+```
+预检 → 改 bundleVersion → 编译检查 → 构建 → 打包 zip → 提交 → 打标签 → 推送 → 创建 Release → 上传资产
+```
+
+脚本只通过 GitHub **API** 创建 Release 与上传资产（不依赖 Actions），
+token 复用 Git Credential Manager 里已存的凭据，也可以用 `-Token` 或 `GITHUB_TOKEN` 覆盖。
+
+> 仓库里**不保留** `.github/workflows/release.yml`：之前那套「推标签触发 workflow」的方案
+> 依赖一台注册了团结引擎的 self-hosted runner，实际没有这样的机器，标签推上去只会让任务
+> 无限排队（而且一旦有 runner 接手，会将旧提交构建的产物覆盖到已发布的 Release 上）。
+> 删除后推标签不会再产生任何排队任务。
+
 

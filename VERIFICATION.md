@@ -1136,12 +1136,18 @@ dotnet build planetcheck.csproj -c Release
 | 标签 | `V2.2.0` |
 | Release | 已创建并上传资产，下载链接可用 |
 
-### 16.6 自动出包的限制
+### 16.6 只在本地发布（不用 CI）
 
-GitHub 托管的 runner **无法**构建本项目：目标引擎是团结引擎（Tuanjie 2022.3.62t11），
-安装包数 GB 且需要激活，不可能在托管 runner 上现装现用。
-因此 `.github/workflows/release.yml` 指定 `runs-on: [self-hosted, windows, tuanjie]`，
-需要一台装了 Tuanjie 的 Windows 机器注册为 runner。
+发布**不使用 GitHub Runner**。原因不是偏好，而是硬约束：构建需要团结引擎
+（Tuanjie 2022.3.62t11），它只装在本地；GitHub 托管的 runner 里没有，也装不上
+（安装包数 GB 且需要激活）。所以整个流程由 scripts/release.ps1 在本地跑完，
+只通过 GitHub **API** 创建 Release 与上传资产。
+
+早期曾提交过 .github/workflows/release.yml（推送 V* 标签时在 self-hosted runner 上
+自动构建）。实际没有这样的 runner，标签推上去只会让任务**无限排队**；更危险的是
+一旦有 runner 接手，会用**旧提交**构建的产物覆盖已发布的资产
+（V2.2.0 / V2.3.0 / V2.3.1 发布时都需要手工取消这些排队任务）。
+因此该 workflow 已删除，仓库不再保留任何 CI 发布配置。
 
 ---
 

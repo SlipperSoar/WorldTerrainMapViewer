@@ -119,6 +119,8 @@ namespace WorldTerrain
                 plateOverlayColors = PlateOverlayColors,
                 axialTilt = Config.axialTilt,
                 waterCoverage = Config.waterCoverage,
+                planetRadiusKm = PlanetProfile.ClampRadiusKm(Config.planetRadiusKm),
+                rotationRetrograde = Config.rotationRetrograde,
                 human = Human
             };
         }

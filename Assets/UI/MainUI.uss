@@ -213,6 +213,43 @@
     color: #E8A33D;
 }
 
+/* ── 星球大小 / 自转方向 ── */
+#planet-size-row {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+#planet-size-row > Label {
+    color: #888;
+    font-size: 12px;
+    width: 60px;
+}
+
+#planet-size-slider {
+    flex-grow: 1;
+    margin-right: 4px;
+}
+
+#planet-size-value {
+    color: #4ECDC4;
+    font-size: 12px;
+    width: 76px;
+    -unity-text-align: middle-right;
+}
+
+#rotation-row {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+#rotation-row > Label {
+    color: #888;
+    font-size: 12px;
+    width: 60px;
+}
+
 #generate-button {
     background-color: rgba(78, 205, 196, 0.3);
     border-width: 1px;

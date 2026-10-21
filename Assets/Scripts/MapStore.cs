@@ -78,6 +78,8 @@ public static class MapStore
             data.axialTilt = meta.axialTilt;
             data.waterCoverage = meta.waterCoverage;
             data.seed = meta.seed;
+            data.planetRadiusKm = meta.planetRadiusKm;
+            data.rotationRetrograde = meta.rotationRetrograde;
             data.generatedAt = meta.generatedAt;
             data.width = meta.mapWidth;
             data.height = meta.mapHeight;
@@ -133,6 +135,8 @@ public static class MapStore
             axialTilt = data.axialTilt,
             waterCoverage = data.waterCoverage,
             seed = data.seed,
+            planetRadiusKm = PlanetProfile.ClampRadiusKm(data.planetRadiusKm),
+            rotationRetrograde = data.rotationRetrograde,
             mapWidth = data.width,
             mapHeight = data.height,
             generatedAt = string.IsNullOrEmpty(data.generatedAt)
@@ -161,6 +165,8 @@ public static class MapStore
             baseName = baseName,
             axialTilt = result.axialTilt,
             waterCoverage = result.waterCoverage,
+            planetRadiusKm = PlanetProfile.ClampRadiusKm(result.planetRadiusKm),
+            rotationRetrograde = result.rotationRetrograde,
             seed = 0,                     // 由调用方按需覆盖（WorldGenResult 不带 seed）
             generatedAt = DateTime.Now.ToString("o"),
             width = result.width,

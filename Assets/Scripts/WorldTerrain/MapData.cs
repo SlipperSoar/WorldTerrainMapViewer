@@ -35,6 +35,12 @@ namespace WorldTerrain
         /// <summary>生成时使用的随机种子。</summary>
         public int seed;
 
+        /// <summary>星球半径（km）。查看器据此换算显示尺寸与镜头距离。</summary>
+        public float planetRadiusKm = PlanetProfile.ReferenceRadiusKm;
+
+        /// <summary>是否逆向自转。查看器据此决定时间流转时太阳的转动方向。</summary>
+        public bool rotationRetrograde;
+
         /// <summary>生成时间（ISO 8601 字符串，空表示未知）。</summary>
         public string generatedAt = "";
 

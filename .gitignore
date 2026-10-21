@@ -81,3 +81,6 @@ screenshots/
 
 # DeepSeek Harness
 dsh_preview/
+
+# Release packaging output (zip is uploaded to GitHub Releases, not committed)
+/dist/

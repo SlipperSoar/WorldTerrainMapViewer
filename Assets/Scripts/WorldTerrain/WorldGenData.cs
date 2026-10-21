@@ -76,6 +76,12 @@ namespace WorldTerrain
         public float waterCoverage;  // 0-1: fraction of surface that should be ocean
         public float axialTilt;      // 地轴倾角（黄赤交角），0-90 度；地图属性
 
+        /// <summary>星球半径（km）；地图属性，只影响显示尺寸与镜头距离，不影响地形。</summary>
+        public float planetRadiusKm;
+
+        /// <summary>是否逆向自转；地图属性，决定时间流转时太阳的转动方向。</summary>
+        public bool rotationRetrograde;
+
         /// <summary>
         /// false（默认）：在单位球面的等面积网格上生成地形，再投影成等距圆柱高度图（推荐）；
         /// true：沿用旧的「直接在矩形网格上生成」路径，便于对比与回退。
@@ -166,6 +172,12 @@ namespace WorldTerrain
 
         /// <summary>本次生成使用的地图属性：水面占比（0-1）。</summary>
         public float waterCoverage;
+
+        /// <summary>本次生成使用的地图属性：星球半径（km）。</summary>
+        public float planetRadiusKm;
+
+        /// <summary>本次生成使用的地图属性：是否逆向自转。</summary>
+        public bool rotationRetrograde;
 
         /// <summary>人文图层：聚落、国家、交通线与自然地名。</summary>
         public HumanGeographyData human;

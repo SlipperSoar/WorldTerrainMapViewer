@@ -177,6 +177,53 @@ public class EarthManager : MonoBehaviour
 
     #endregion
 
+    #region 星球尺寸
+
+    /// <summary>
+    /// 星球在场景里的基准缩放（首次应用尺寸时记录）。
+    /// 之后所有尺寸都以它为 1.0 倍，避免反复相乘导致漂移。
+    /// </summary>
+    private float _baseEarthScale = -1f;
+
+    /// <summary>当前星球半径（km）。</summary>
+    public float PlanetRadiusKm { get; private set; } = PlanetProfile.ReferenceRadiusKm;
+
+    /// <summary>
+    /// 设置星球半径（km），按地球半径为 1.0 倍缩放星球本身。
+    ///
+    /// 只改 <c>earthRenderer</c> 的 localScale：
+    ///   - 板块分界球、人文叠加球都是它的**子物体**，会跟着一起缩放
+    ///   - 云层按星球的世界包围盒自适应（见 CloudLayer.ApplyScale）
+    ///   - 相机距离由调用方一起调整（见 CameraController.SetPlanetScale）
+    /// </summary>
+    public void SetPlanetRadiusKm(float radiusKm)
+    {
+        PlanetRadiusKm = PlanetProfile.ClampRadiusKm(radiusKm);
+
+        if (earthRenderer == null)
+        {
+            Debug.LogWarning("EarthManager: earthRenderer 未指定，无法应用星球尺寸");
+            return;
+        }
+
+        Transform earth = earthRenderer.transform;
+        if (_baseEarthScale < 0f)
+            _baseEarthScale = earth.localScale.x > 0f ? earth.localScale.x : 1f;
+
+        float factor = PlanetProfile.ScaleForRadiusKm(PlanetRadiusKm);
+        earth.localScale = Vector3.one * (_baseEarthScale * factor);
+
+        // 云层按星球世界半径自适应，星球缩放后必须让它重算 ——
+        // 否则云层会停在旧尺寸上（缩小星球时云层浮在远处，放大时被地表穿破）
+        if (_cloudLayer != null)
+            _cloudLayer.RefreshScale();
+
+        Debug.Log($"星球尺寸：{PlanetProfile.RadiusLabel(PlanetRadiusKm)}，" +
+                  $"场景缩放 {earth.localScale.x:F3}");
+    }
+
+    #endregion
+
     #region Public Methods
 
     public void SetEarthSurface(Texture2D texture)

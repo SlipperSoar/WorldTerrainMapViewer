@@ -35,6 +35,12 @@ public class SunLightController : MonoBehaviour
     [Header("Initialization")] [SerializeField]
     private bool applyAxialTiltOnInit = true;
 
+    /// <summary>
+    /// 自转方向：+1 顺向（地球式，太阳自东向西）、−1 逆向。
+    /// 只影响时间流逝时太阳的绕行方向，不影响时间本身的速度。
+    /// </summary>
+    [SerializeField] private int rotationDirection = 1;
+
     private float dayProgress = 0f;
     private float yearProgress = 0f;
 
@@ -194,7 +200,9 @@ public class SunLightController : MonoBehaviour
             return;
         }
 
-        float dayAngle = dayProgress * 360f;
+        // 自转方向：顺向 +1、逆向 −1。时间本身仍单调递增，变的是太阳绕行的方向 ——
+        // 逆向自转的星球上太阳自西向东升，与地球相反。
+        float dayAngle = dayProgress * 360f * rotationDirection;
 
         Vector3 sunDirection = Quaternion.Euler(0, dayAngle, 0) * Vector3.forward;
 
@@ -208,7 +216,7 @@ public class SunLightController : MonoBehaviour
 
     private void UpdateSunPositionWithoutEarth()
     {
-        float dayAngle = dayProgress * 360f - 90f;
+        float dayAngle = dayProgress * 360f * rotationDirection - 90f;
 
         float seasonOffset = 0f;
         if (enableSeasons)
@@ -246,6 +254,24 @@ public class SunLightController : MonoBehaviour
         currentTimeOfDay = Mathf.Clamp(time, 0, dayDuration);
         dayProgress = currentTimeOfDay / dayDuration;
         UpdateSunPosition();
+    }
+
+    /// <summary>是否逆向自转。</summary>
+    public bool IsRetrograde => rotationDirection < 0;
+
+    /// <summary>
+    /// 设置自转方向：<c>true</c> 为逆向（太阳反向绕行）。
+    /// 立即重算光照，不需要等到下一帧。
+    /// </summary>
+    public void SetRotationDirection(bool retrograde)
+    {
+        int direction = retrograde ? -1 : 1;
+        if (direction == rotationDirection)
+            return;
+
+        rotationDirection = direction;
+        UpdateSunPosition();
+        Debug.Log($"自转方向：{PlanetProfile.RotationLabel(retrograde)}");
     }
 
     public void SetDayOfYear(float day)

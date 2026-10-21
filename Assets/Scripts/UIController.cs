@@ -34,6 +34,9 @@ public class UIController : MonoBehaviour
     private Label _waterValue;
     private Slider _tiltSlider;
     private Label _tiltValue;
+    private Slider _planetSizeSlider;
+    private Label _planetSizeValue;
+    private Toggle _retrogradeToggle;
     private Slider _resolutionSlider;
     private Label _resolutionValue;
     private Label _resolutionHint;
@@ -75,6 +78,8 @@ public class UIController : MonoBehaviour
     private bool _isUpdatingTimeSlider = false;
     private bool _isUpdatingSeasonSlider = false;
     private float _pendingAxialTilt = MapMetaData.DefaultAxialTilt;
+    private float _pendingPlanetRadiusKm = PlanetProfile.DefaultRadiusKm;
+    private bool _pendingRetrograde;
     private List<VisualElement> _mapItems = new List<VisualElement>();
     private List<VisualElement> _markerItems = new List<VisualElement>();
     private Texture2D _currentTexture;
@@ -135,6 +140,10 @@ public class UIController : MonoBehaviour
         // UXML 里已有的两个开关也紧凑化（放在最后：新插入的开关此时都已就位）
         MakeToggleCompact(_autoCycleToggle);
         MakeToggleCompact(_arrowToggle);
+
+        // 侧边栏的「逆向自转」也是 UXML 里的 Toggle，同样要紧凑化 ——
+        // 否则内置 label 的定宽 + 输入区 0 宽会把勾选框裁掉（见 CompactToggleInternals）
+        MakeToggleCompact(_retrogradeToggle);
 
         // 布局自检：顶栏宽度超出可用空间时会压到右侧栏，这里一次性报出来
         _root.schedule.Execute(ReportTopBarLayout).StartingIn(200);
@@ -206,6 +215,9 @@ public class UIController : MonoBehaviour
         _waterValue = _root.Q<Label>("water-value");
         _tiltSlider = _root.Q<Slider>("tilt-slider");
         _tiltValue = _root.Q<Label>("tilt-value");
+        _planetSizeSlider = _root.Q<Slider>("planet-size-slider");
+        _planetSizeValue = _root.Q<Label>("planet-size-value");
+        _retrogradeToggle = _root.Q<Toggle>("retrograde-toggle");
         _resolutionSlider = _root.Q<Slider>("resolution-slider");
         _resolutionValue = _root.Q<Label>("resolution-value");
         _resolutionHint = _root.Q<Label>("resolution-hint");
@@ -1329,6 +1341,21 @@ public class UIController : MonoBehaviour
             UpdateTiltLabel(_tiltSlider.value);
         }
 
+        // 星球大小：地图属性，生成时由该滑动条决定（0.4~2.5 倍地球半径）
+        if (_planetSizeSlider != null)
+        {
+            _planetSizeSlider.lowValue = PlanetProfile.MinRadiusKm;
+            _planetSizeSlider.highValue = PlanetProfile.MaxRadiusKm;
+            _planetSizeSlider.value = PlanetProfile.DefaultRadiusKm;
+
+            _planetSizeSlider.RegisterValueChangedCallback(evt =>
+            {
+                // 与地轴倾角一样：只是「下次生成」的参数，不实时改变当前星球
+                UpdatePlanetSizeLabel(PlanetProfile.ClampRadiusKm(evt.newValue));
+            });
+            UpdatePlanetSizeLabel(_planetSizeSlider.value);
+        }
+
         if (_generateButton != null)
         {
             _generateButton.clicked += OnGenerateButtonClicked;
@@ -1337,14 +1364,38 @@ public class UIController : MonoBehaviour
         // 生成分辨率：滑条走 4 个离散档位（1024 / 2048 / 4096 / 8192 宽度）
         if (_resolutionSlider != null)
         {
+            // 本机内存允许到哪一档：滑条上限直接卡在这里，用户拖不到更高档位
+            int maxIndex = MapResolution.MaxAllowedIndex(SystemInfo.systemMemorySize);
+
             _resolutionSlider.lowValue = 0;
-            _resolutionSlider.highValue = MapResolution.Widths.Length - 1;
-            _resolutionSlider.value = MapResolution.DefaultIndex;
+            _resolutionSlider.highValue = Mathf.Max(0, Mathf.Min(maxIndex < 0 ? 0 : maxIndex,
+                                                                 MapResolution.Widths.Length - 1));
+            _resolutionSlider.value = Mathf.Clamp(
+                MapResolution.DefaultIndex, 0, Mathf.RoundToInt(_resolutionSlider.highValue));
+
+            // 连最低档都放不下：禁用生成，并说明原因
+            if (maxIndex < 0)
+            {
+                _resolutionSlider.SetEnabled(false);
+                if (_generateButton != null)
+                    _generateButton.SetEnabled(false);
+
+                if (_resolutionHint != null)
+                {
+                    _resolutionHint.text =
+                        $"可用内存不足（本机 {SystemInfo.systemMemorySize} MB），无法生成";
+                    _resolutionHint.AddToClassList("resolution-hint-warn");
+                }
+
+                Debug.LogWarning($"内存不足：物理内存 {SystemInfo.systemMemorySize} MB，" +
+                                 $"连 {MapResolution.Label(MapResolution.MinWidth)} 都放不下" +
+                                 $"（需要 {MapResolution.RequiredLabel(MapResolution.MinWidth)}），已禁用生成");
+            }
 
             _resolutionSlider.RegisterValueChangedCallback(evt =>
             {
-                int index = Mathf.Clamp(
-                    Mathf.RoundToInt(evt.newValue), 0, MapResolution.Widths.Length - 1);
+                int upper = Mathf.RoundToInt(_resolutionSlider.highValue);
+                int index = Mathf.Clamp(Mathf.RoundToInt(evt.newValue), 0, upper);
 
                 // 吸附到整数档位：滑条本身没有步进，这里把值扣回离散点
                 if (!Mathf.Approximately(_resolutionSlider.value, index))
@@ -1353,7 +1404,8 @@ public class UIController : MonoBehaviour
                 UpdateResolutionLabel(index);
             });
 
-            UpdateResolutionLabel((int)_resolutionSlider.value);
+            if (maxIndex >= 0)
+                UpdateResolutionLabel((int)_resolutionSlider.value);
         }
 
         if (_seedRandomBtn != null)
@@ -1367,8 +1419,8 @@ public class UIController : MonoBehaviour
     }
 
     /// <summary>
-    /// 刷新分辨率显示：标签给出「宽×高」，下面一行给出粗略内存估算；
-    /// 估算超过本机内存一半时标黄提示（不阻止生成，只提醒）。
+    /// 刷新分辨率显示：标签给出「宽×高」，下面一行给出内存需求；
+    /// 同时说明本机允许的最高档位（被内存限制时会点明）。
     /// </summary>
     private void UpdateResolutionLabel(int index)
     {
@@ -1380,12 +1432,22 @@ public class UIController : MonoBehaviour
         if (_resolutionHint == null)
             return;
 
-        bool warn = MapResolution.MayExceedMemory(width, SystemInfo.systemMemorySize);
-        _resolutionHint.text =
-            $"内存 {MapResolution.EstimateLabel(width)}" +
-            (warn ? "（可能超出本机内存）" : "");
+        int maxWidth = MapResolution.MaxAllowedWidth(SystemInfo.systemMemorySize);
 
-        if (warn)
+        if (maxWidth <= 0)
+        {
+            // 连最低档都放不下：这里只说结论，不要用一个假的档位名误导
+            _resolutionHint.text = $"可用内存不足（本机 {SystemInfo.systemMemorySize} MB）";
+            _resolutionHint.AddToClassList("resolution-hint-warn");
+            return;
+        }
+
+        _resolutionHint.text =
+            $"内存 {MapResolution.EstimateLabel(width)}｜本机最高 {MapResolution.Label(maxWidth)}";
+
+        // 被内存卡住（本机允许的最高档低于最高档位）时标黄，提醒用户不是程序出错
+        bool limited = maxWidth < MapResolution.MaxWidth;
+        if (limited)
             _resolutionHint.AddToClassList("resolution-hint-warn");
         else
             _resolutionHint.RemoveFromClassList("resolution-hint-warn");
@@ -1416,20 +1478,45 @@ public class UIController : MonoBehaviour
         axialTilt = MapMetaData.ClampAxialTilt(axialTilt);
         _pendingAxialTilt = axialTilt;
 
+        float planetRadiusKm = _planetSizeSlider != null
+            ? PlanetProfile.ClampRadiusKm(_planetSizeSlider.value)
+            : PlanetProfile.DefaultRadiusKm;
+        bool retrograde = _retrogradeToggle != null && _retrogradeToggle.value;
+        _pendingPlanetRadiusKm = planetRadiusKm;
+        _pendingRetrograde = retrograde;
+
         if (_genProgress != null)
             _genProgress.text = "生成中...";
 
         if (WorldTerrainGenerator.Instance != null)
         {
             int width = SelectedGenerationWidth;
+
+            // 双保险：滑条已经卡住上限，这里再挡一次（防止程序化改值绕过）
+            if (!MapResolution.IsAllowed(width, SystemInfo.systemMemorySize))
+            {
+                string reason =
+                    $"{MapResolution.Label(width)} 需要 {MapResolution.RequiredLabel(width)}，" +
+                    $"超出本机内存预算（物理内存 {SystemInfo.systemMemorySize} MB，" +
+                    $"最高允许 {MapResolution.Label(MapResolution.MaxAllowedWidth(SystemInfo.systemMemorySize))}）";
+
+                Debug.LogError($"已阻止生成：{reason}");
+                if (_genProgress != null)
+                    _genProgress.text = "内存不足，已阻止生成";
+                return;
+            }
+
             Debug.Log($"开始生成：{MapResolution.Label(width)}，seed {seed}，" +
                       $"水面 {waterCoverage * 100:F0}%，倾角 {axialTilt:F1}°，" +
+                      $"星球 {PlanetProfile.RadiusLabel(planetRadiusKm)}，" +
+                      $"{PlanetProfile.RotationLabel(retrograde)}，" +
                       $"预计内存 {MapResolution.EstimateLabel(width)}");
 
             WorldTerrainGenerator.Instance.onProgress = OnGenerationProgress;
             WorldTerrainGenerator.Instance.onComplete = OnGenerationComplete;
             WorldTerrainGenerator.Instance.onError = OnGenerationError;
-            WorldTerrainGenerator.Instance.GenerateWorld(seed, width, waterCoverage, axialTilt);
+            WorldTerrainGenerator.Instance.GenerateWorld(
+                seed, width, waterCoverage, axialTilt, planetRadiusKm, retrograde);
         }
         else
         {
@@ -1455,9 +1542,11 @@ public class UIController : MonoBehaviour
         }
         Debug.Log($"World generation complete: {path}");
 
-        // 生成使用的地轴倾角已经写入地图元数据，这里确保视觉状态一致
+        // 生成使用的地轴倾角 / 星球大小 / 自转方向都已写入地图元数据，
+        // 这里确保视觉状态与之一致
         SetTiltSliderValue(_pendingAxialTilt);
         ApplyAxialTiltToEarth(_pendingAxialTilt);
+        ApplyPlanetAppearance(_pendingPlanetRadiusKm, _pendingRetrograde);
 
         LoadImagesFromStreamingAssets();
     }
@@ -1477,6 +1566,48 @@ public class UIController : MonoBehaviour
     {
         if (_tiltValue != null)
             _tiltValue.text = $"{tilt:F1}°";
+    }
+
+    private void UpdatePlanetSizeLabel(float radiusKm)
+    {
+        if (_planetSizeValue != null)
+            _planetSizeValue.text = $"{PlanetProfile.ClampRadiusKm(radiusKm):F0} km";
+    }
+
+    /// <summary>
+    /// 应用星球大小与自转方向：缩放星球本体、等比调整镜头距离、翻转太阳日行方向。
+    ///
+    /// 三者必须一起改 —— 只放大星球会让相机陷进地面，只改方向会让昼夜与星球尺寸不匹配。
+    /// 编辑模式下只同步 UI：改场景里星球的缩放会被存进场景文件，污染工程。
+    /// </summary>
+    private void ApplyPlanetAppearance(float radiusKm, bool retrograde)
+    {
+        float km = PlanetProfile.ClampRadiusKm(radiusKm);
+        float scale = PlanetProfile.ScaleForRadiusKm(km);
+
+        if (Application.isPlaying)
+        {
+            if (EarthManager.Instance != null)
+                EarthManager.Instance.SetPlanetRadiusKm(km);
+
+            if (cameraController != null)
+                cameraController.SetPlanetScale(scale);
+
+            if (sunLightController != null)
+                sunLightController.SetRotationDirection(retrograde);
+
+            Debug.Log($"星球外观：{PlanetProfile.RadiusLabel(km)}，" +
+                      $"{PlanetProfile.RotationLabel(retrograde)}，镜头 ×{scale:F2}");
+        }
+
+        // 滑动条同步到这颗星球实际使用的值（它是「下次生成」的参数，
+        // 但载入地图后要和当前星球一致，否则用户会以为改过）
+        if (_planetSizeSlider != null)
+            _planetSizeSlider.SetValueWithoutNotify(km);
+        UpdatePlanetSizeLabel(km);
+
+        if (_retrogradeToggle != null)
+            _retrogradeToggle.SetValueWithoutNotify(retrograde);
     }
 
     /// <summary>
@@ -1510,8 +1641,8 @@ public class UIController : MonoBehaviour
     }
 
     /// <summary>
-    /// 应用地图自身的属性（地轴倾角、水面占比），并同步到滑动条与地球。
-    /// 参数改成 <see cref="MapData"/> 契约：这些值已经在载入时从 meta 读好，
+    /// 应用地图自身的属性（地轴倾角、水面占比、星球大小、自转方向），并同步到 UI 与地球。
+    /// 参数是 <see cref="MapData"/> 契约：这些值已经在载入时从 meta 读好，
     /// 这里不再自己读一遍文件。
     /// </summary>
     private void ApplyMapProperties(MapData map)
@@ -1531,8 +1662,16 @@ public class UIController : MonoBehaviour
                 _waterValue.text = $"{_waterSlider.value * 100:F0}%";
         }
 
+        // 星球大小与自转方向：缩放星球 + 等比调整镜头 + 翻转太阳日行方向
+        float radiusKm = PlanetProfile.ClampRadiusKm(map.planetRadiusKm);
+        _pendingPlanetRadiusKm = radiusKm;
+        _pendingRetrograde = map.rotationRetrograde;
+        ApplyPlanetAppearance(radiusKm, map.rotationRetrograde);
+
         Debug.Log($"已应用地图属性 '{map.baseName}'：axialTilt={tilt:F1}°，" +
-                  $"waterCoverage={map.waterCoverage * 100:F1}%");
+                  $"waterCoverage={map.waterCoverage * 100:F1}%，" +
+                  $"planet={PlanetProfile.RadiusLabel(radiusKm)}，" +
+                  $"{PlanetProfile.RotationLabel(map.rotationRetrograde)}");
     }
 
     #endregion

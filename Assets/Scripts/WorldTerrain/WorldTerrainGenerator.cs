@@ -67,7 +67,10 @@ public class WorldTerrainGenerator : MonoBehaviour
     /// </param>
     /// <param name="waterCoverage">水面占比（0-1，&lt;0 用当前默认值）</param>
     /// <param name="axialTilt">地轴倾角（0-90 度，&lt;0 用当前默认值）</param>
-    public void GenerateWorld(int seed, int width = 0, float waterCoverage = -1f, float axialTilt = -1f)
+    /// <param name="planetRadiusKm">星球半径（km，&lt;0 用默认值 = 地球）</param>
+    /// <param name="rotationRetrograde">是否逆向自转</param>
+    public void GenerateWorld(int seed, int width = 0, float waterCoverage = -1f, float axialTilt = -1f,
+        float planetRadiusKm = -1f, bool rotationRetrograde = false)
     {
         if (isGenerating)
         {
@@ -83,6 +86,21 @@ public class WorldTerrainGenerator : MonoBehaviour
         if (snapped != width)
             Debug.Log($"生成宽度 {width} 不在可选档位内，已吸附到 {snapped}");
 
+        // 内存不足时不允许生成过高的分辨率（UI 已把滑条卡住，这里是第二道防线，
+        // 也拦住脚本/其它调用方绕过界面直接调用的情形）
+        int systemMemoryMb = SystemInfo.systemMemorySize;
+        if (!MapResolution.IsAllowed(snapped, systemMemoryMb))
+        {
+            string reason =
+                $"内存不足，已拒绝生成 {MapResolution.Label(snapped)}：" +
+                $"需要 {MapResolution.RequiredLabel(snapped)}，本机物理内存 {systemMemoryMb} MB，" +
+                $"最高允许 {MapResolution.Label(MapResolution.MaxAllowedWidth(systemMemoryMb))}";
+
+            Debug.LogError(reason);
+            onError?.Invoke(reason);
+            return;
+        }
+
         if (waterCoverage < 0f)
             waterCoverage = this.waterCoverage;
 
@@ -90,7 +108,12 @@ public class WorldTerrainGenerator : MonoBehaviour
             axialTilt = this.axialTilt;
         axialTilt = MapMetaData.ClampAxialTilt(axialTilt);
 
-        StartCoroutine(GenerateWorldCoroutine(seed, snapped, waterCoverage, axialTilt));
+        if (planetRadiusKm < 0f)
+            planetRadiusKm = PlanetProfile.DefaultRadiusKm;
+        planetRadiusKm = PlanetProfile.ClampRadiusKm(planetRadiusKm);
+
+        StartCoroutine(GenerateWorldCoroutine(
+            seed, snapped, waterCoverage, axialTilt, planetRadiusKm, rotationRetrograde));
     }
 
     /// <summary>当前默认生成宽度（像素）。</summary>
@@ -102,7 +125,8 @@ public class WorldTerrainGenerator : MonoBehaviour
 
     #region Private
 
-    private IEnumerator GenerateWorldCoroutine(int seed, int mapWidth, float waterCoverage, float axialTilt)
+    private IEnumerator GenerateWorldCoroutine(int seed, int mapWidth, float waterCoverage,
+        float axialTilt, float planetRadiusKm, bool rotationRetrograde)
     {
         int mapHeight = MapResolution.HeightFor(mapWidth);
         var config = new WorldGenConfig
@@ -115,7 +139,9 @@ public class WorldTerrainGenerator : MonoBehaviour
             maxElevation = 10000f,
             minElevation = -10000f,
             waterCoverage = waterCoverage,
-            axialTilt = axialTilt
+            axialTilt = axialTilt,
+            planetRadiusKm = planetRadiusKm,
+            rotationRetrograde = rotationRetrograde
         };
 
         generationProgress = 0f;

@@ -158,6 +158,34 @@ public class CameraController : MonoBehaviour
 
     #region 公开接口
 
+    /// <summary>当前星球缩放（1.0 = 地球大小）。</summary>
+    public float PlanetScale { get; private set; } = 1f;
+
+    /// <summary>
+    /// 跟随星球尺寸调整镜头距离。
+    ///
+    /// 星球放大 N 倍时，距离上下限也乘 N 倍 —— 这样「镜头相对星球的比例」保持不变，
+    /// 换到更大的星球上视野构图不会突变。按**比例**换算而不是直接赋值，
+    /// 因此可以在不同尺寸的地图之间来回切换。
+    /// </summary>
+    public void SetPlanetScale(float scale)
+    {
+        if (float.IsNaN(scale) || scale <= 0f)
+            scale = 1f;
+        if (Mathf.Approximately(scale, PlanetScale))
+            return;
+
+        float ratio = scale / PlanetScale;
+        PlanetScale = scale;
+
+        distance *= ratio;
+        minDistance *= ratio;
+        maxDistance *= ratio;
+
+        UpdateCameraPosition();
+        Debug.Log($"镜头距离随星球尺寸 ×{ratio:F3} → {distance:F2}");
+    }
+
     public float GetHorizontalRotation()
     {
         return Mathf.Repeat(orbit.YawDegrees, 360f) % 360f;

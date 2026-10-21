@@ -29,6 +29,15 @@
                     <ui:Label name="resolution-value" text="2048×1024" />
                 </ui:VisualElement>
                 <ui:Label name="resolution-hint" text="内存 约 0.4 GB" />
+                <ui:VisualElement name="planet-size-row">
+                    <ui:Label text="星球大小" />
+                    <ui:Slider name="planet-size-slider" low-value="0.4" high-value="2.5" value="1" style="width: 167px;" />
+                    <ui:Label name="planet-size-value" text="6371 km" />
+                </ui:VisualElement>
+                <ui:VisualElement name="rotation-row">
+                    <ui:Label text="自转方向" />
+                    <ui:Toggle name="retrograde-toggle" label="逆向自转" value="false" />
+                </ui:VisualElement>
                 <ui:Button name="generate-button" text="生成新世界" />
                 <ui:Label name="gen-progress-label" />
             </ui:VisualElement>

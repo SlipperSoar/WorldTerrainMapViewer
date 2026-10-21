@@ -1,0 +1,81 @@
+# 推送 V* 标签时自动「构建 Windows 包 → 上传到该标签的 Release」。
+#
+# 为什么必须用 self-hosted runner：
+#   GitHub 托管的 runner 里没有团结引擎（Tuanjie），而本项目只能用 Tuanjie 2022.3.62t11 构建。
+#   团结引擎安装包数 GB 且需要激活，不可能在托管 runner 上临时装好并激活。
+#   所以这里要求一台装了 Tuanjie 的 Windows 机器注册成 self-hosted runner，并带上 `tuanjie` 标签：
+#       Actions → Runners → New self-hosted runner（Windows）
+#       ./config.cmd --url https://github.com/<owner>/<repo> --token <TOKEN> --labels tuanjie,windows
+#
+# 触发方式：
+#   - 推标签：git push origin V2.2.0
+#   - 或在 Actions 页面手动 Run workflow，填版本号
+#
+# 提交（commit/tag/push）由 scripts/release.ps1 在本地完成；这个 workflow 只负责
+# 「构建 + 打包 + 上传」，因为构建必须在装了引擎的机器上进行。
+name: Release (Windows build)
+
+on:
+  push:
+    tags:
+      - 'V*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag, e.g. V2.2.0'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    # 需要装了团结引擎的自托管 runner
+    runs-on: [self-hosted, windows, tuanjie]
+    timeout-minutes: 90
+
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+      # 团结引擎路径：runner 上安装位置不同时，在仓库变量或 runner 环境变量里覆盖
+      TUANJIE_EDITOR: ${{ vars.TUANJIE_EDITOR || 'C:\Program Files\Tuanjie\Hub\Editor\2022.3.62t11\Editor\Tuanjie.exe' }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify editor exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path $env:TUANJIE_EDITOR)) {
+            Write-Error "Tuanjie editor not found at $env:TUANJIE_EDITOR"
+            exit 1
+          }
+          Write-Host "editor: $env:TUANJIE_EDITOR"
+
+      - name: Build Windows player
+        shell: pwsh
+        run: |
+          ./scripts/release.ps1 -Version $env:TAG -SkipCommit -SkipPush -SkipRelease -EditorPath $env:TUANJIE_EDITOR -AllowDirty
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload to GitHub Release
+        shell: pwsh
+        run: |
+          # 复用同一个脚本的「创建 Release + 上传资产」段；构建已完成，跳过前三步
+          ./scripts/release.ps1 -Version $env:TAG -SkipCommit -SkipPush -SkipBuild -AllowDirty -Token $env:GITHUB_TOKEN
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload workflow artifact (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: WorldTerrainMapViewer-${{ env.TAG }}
+          path: dist/WorldTerrainMapViewer.zip
+          if-no-files-found: error

@@ -102,17 +102,90 @@ namespace WorldTerrain
             return gb >= 1.0 ? $"约 {gb:F1} GB" : $"约 {gb * 1024:F0} MB";
         }
 
+        /// <summary>把「生成峰值 + 引擎余量」格式化成便于显示的文字。</summary>
+        public static string RequiredLabel(int width)
+        {
+            double gb = RequiredBytes(width) / (1024.0 * 1024.0 * 1024.0);
+            return gb >= 1.0 ? $"约 {gb:F1} GB" : $"约 {gb * 1024:F0} MB";
+        }
+
+        // ── 内存是否够用 ──
+        //
+        // 依据是**物理内存总量**（SystemInfo.systemMemorySize），不是"当前可用" ——
+        // Unity 没有跨平台的「可用内存」查询接口。所以这是个上界判断：
+        // 总量都不够的档位一定不能选；总量够但系统已被别的程序占满时仍可能失败，
+        // 那种情况会走正常的生成失败提示（不会崩溃）。
+
         /// <summary>
-        /// 该档位是否可能超出本机可用内存。用于在 UI 上给出警示（不阻止生成）。
+        /// 允许生成占用的内存上限占**物理内存总量**的比例。
+        /// 取一半：生成期间系统、编辑器、贴图都要活。
         /// </summary>
-        public static bool MayExceedMemory(int width, int systemMemoryMb)
+        public const double MemoryBudgetFraction = 0.5;
+
+        /// <summary>
+        /// 生成之外必须留出的余量：Unity 运行时、编辑器、系统与图形驱动的固定开销。
+        /// 实测小型图生成后 Unity 自身就要 200 MB 以上，编辑器还要更多，256 MB 明显不够。
+        /// </summary>
+        public const long EngineReserveBytes = 512L * 1024 * 1024;
+
+        /// <summary>
+        /// 三张显示贴图在**显存**里的大小（RGBA32 × 3 = 每格 12 字节）。
+        /// 这部分不在 <see cref="EstimatedPeakBytes"/> 里（那只是托管堆峰值）。
+        /// </summary>
+        public static long GpuTextureBytes(int width)
+        {
+            return CellCount(width) * 12L;
+        }
+
+        /// <summary>物理内存总量对应的可用预算（字节）。</summary>
+        public static long MemoryBudgetBytes(int systemMemoryMb)
         {
             if (systemMemoryMb <= 0)
-                return false;
+                return 0;
+            return (long)((long)systemMemoryMb * 1024 * 1024 * MemoryBudgetFraction);
+        }
 
-            long available = (long)systemMemoryMb * 1024 * 1024;
-            // 给系统与 Unity 自身留一半
-            return EstimatedPeakBytes(width) > available / 2;
+        /// <summary>某个档位的总内存需求 = 生成峰值 + 显存贴图 + 引擎余量（字节）。</summary>
+        public static long RequiredBytes(int width)
+        {
+            return EstimatedPeakBytes(width) + GpuTextureBytes(width) + EngineReserveBytes;
+        }
+
+        /// <summary>
+        /// 该档位在给定物理内存下是否允许生成。
+        ///
+        /// <paramref name="systemMemoryMb"/> ≤ 0 表示拿不到内存信息（某些平台），
+        /// 此时不限制 —— 宁可让生成失败也不要误禁。
+        /// </summary>
+        public static bool IsAllowed(int width, int systemMemoryMb)
+        {
+            if (systemMemoryMb <= 0)
+                return true;
+
+            return RequiredBytes(width) <= MemoryBudgetBytes(systemMemoryMb);
+        }
+
+        /// <summary>
+        /// 给定物理内存下允许的最高档位宽度；连 1024 都放不下时返回 0（表示禁止生成）。
+        /// </summary>
+        public static int MaxAllowedWidth(int systemMemoryMb)
+        {
+            if (systemMemoryMb <= 0)
+                return MaxWidth;
+
+            int best = 0;
+            for (int i = 0; i < Widths.Length; i++)
+                if (IsAllowed(Widths[i], systemMemoryMb))
+                    best = Widths[i];
+
+            return best;
+        }
+
+        /// <summary>允许的最高档位下标（与 <see cref="MaxAllowedWidth"/> 对应；全禁时返回 -1）。</summary>
+        public static int MaxAllowedIndex(int systemMemoryMb)
+        {
+            int width = MaxAllowedWidth(systemMemoryMb);
+            return width <= 0 ? -1 : IndexOf(width);
         }
 
         /// <summary>显示用标签，例如 “2048×1024”。</summary>

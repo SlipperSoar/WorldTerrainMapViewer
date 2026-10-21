@@ -27,6 +27,12 @@ public class MapMetaData
     /// <summary>生成时使用的随机种子。</summary>
     public int seed;
 
+    /// <summary>星球半径（km）。缺省 = 地球半径；老地图读出来就是地球大小。</summary>
+    public float planetRadiusKm = PlanetProfile.ReferenceRadiusKm;
+
+    /// <summary>是否逆向自转（时间流转时太阳反向绕行）。缺省 = 顺向。</summary>
+    public bool rotationRetrograde;
+
     /// <summary>地图宽度（像素）。</summary>
     public int mapWidth;
 
@@ -90,6 +96,7 @@ public class MapMetaData
 
             meta.axialTilt = ClampAxialTilt(meta.axialTilt);
             meta.waterCoverage = Mathf.Clamp01(meta.waterCoverage);
+            meta.planetRadiusKm = PlanetProfile.ClampRadiusKm(meta.planetRadiusKm);
             return meta;
         }
         catch (Exception e)

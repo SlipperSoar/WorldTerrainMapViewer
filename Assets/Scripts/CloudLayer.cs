@@ -310,6 +310,14 @@ public class CloudLayer : MonoBehaviour
     }
 
     /// <summary>
+    /// 星球尺寸变化后重算球壳大小（否则云层会停在旧尺寸上，被星球穿破或浮在半空）。
+    /// </summary>
+    public void RefreshScale()
+    {
+        ApplyScale();
+    }
+
+    /// <summary>
     /// 把云层球壳缩放到「星球世界半径 × (1 + thickness)」。
     /// 星球半径取自**网格包围盒 × 世界缩放**（见 <see cref="GetEarthWorldRadius"/>），
     /// 而不是照抄 localScale；再按父级等比缩放换算成云层的本地缩放。

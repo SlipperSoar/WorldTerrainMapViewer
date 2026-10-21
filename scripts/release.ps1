@@ -3,22 +3,24 @@
     One-command release: build, commit, tag, push, package, upload to GitHub Release.
 
 .DESCRIPTION
+    NOTE: this file MUST stay pure ASCII. Windows PowerShell 5.1 reads a BOM-less
+    .ps1 as ANSI, so any non-ASCII literal or comment turns into mojibake -- and a
+    mangled line can silently swallow the next statement. Chinese release notes live
+    in release-notes/*.md and are read explicitly as UTF-8.
+
     Order matters: the Windows build runs BEFORE the tag is created, so a build
     failure never leaves a tag pointing at a version with no artifact.
 
     Steps (each skippable):
       1. Preflight (token, repo, editor)
       2. Bump ProjectSettings bundleVersion
-      3. Build StandaloneWindows64 via Tuanjie batchmode
-      4. Zip Build/ -> dist/WorldTerrainMapViewer.zip
-      5. git add -A + commit
-      6. git tag V<Version>
-      7. git push origin <branch> + tag
-      8. Create/find the GitHub Release and upload the zip
-
-    Output is ASCII only on purpose: Windows PowerShell 5.1 reads this file as ANSI,
-    so non-ASCII literals would be mangled. Chinese release notes come from
-    -NotesFile, read explicitly as UTF-8.
+      3. Compile check (WindowsBuild.CheckCompile) -- fail fast on script errors
+      4. Build StandaloneWindows64 via Tuanjie batchmode
+      5. Zip Build/ -> dist/WorldTerrainMapViewer.zip
+      6. git add -A + commit
+      7. git tag V<Version>
+      8. git push origin <branch> + tag
+      9. Create/find the GitHub Release and upload the zip
 
 .PARAMETER Version
     Version without leading V, e.g. 2.2.0  (tag becomes V2.2.0).
@@ -125,12 +127,13 @@ if (-not $SkipBuild) {
 
     $logPath = Join-Path $DistDir "build.log"
     if (Test-Path $logPath) { Remove-Item $logPath -Force }
+    $checkLog = Join-Path $DistDir "compile-check.log"
+    if (Test-Path $checkLog) { Remove-Item $checkLog -Force }
 
     $env:WTMV_BUILD_DIR = $BuildDir
 
-    # 先单独确认脚本编译通过，避免"构建成功但编的是旧程序集"这种假成功
-    $checkLog = Join-Path $DistDir "compile-check.log"
-    if (Test-Path $checkLog) { Remove-Item $checkLog -Force }
+    # Compile check first: a build that silently reuses a stale assembly is worse
+    # than a build that fails loudly.
     $checkArgs = @(
         "-batchmode", "-nographics", "-quit",
         "-projectPath", "`"$RepoRoot`"",
@@ -139,9 +142,10 @@ if (-not $SkipBuild) {
     )
     Info "checking script compilation"
     $check = Start-Process -FilePath $EditorPath -ArgumentList $checkArgs -Wait -PassThru -NoNewWindow
+
     $checkOk = $false
     if (Test-Path $checkLog) {
-        $checkOk = (Select-String -Path $checkLog -Pattern 'COMPILE_OK' -Quiet) -eq $true
+        $checkOk = [bool](Select-String -Path $checkLog -Pattern 'COMPILE_OK' -Quiet)
     }
     if ($check.ExitCode -ne 0 -or -not $checkOk) {
         if (Test-Path $checkLog) {
@@ -164,8 +168,8 @@ if (-not $SkipBuild) {
     Info "editor exit code: $($proc.ExitCode)"
 
     if (Test-Path $logPath) {
-        $tail = Select-String -Path $logPath -Pattern 'BUILD_OK|\[Build\]|error CS|Exception' |
-                Select-Object -Last 25
+        $tail = Select-String -Path $logPath -Pattern 'BUILD_OK|\[Build\]' |
+                Select-Object -Last 12
         if ($tail) {
             Info "log tail:"
             $tail | ForEach-Object { Write-Host ("    " + $_.Line) }
@@ -235,7 +239,7 @@ Step "GitHub Release $Tag"
 $body = ""
 if ($NotesFile) {
     if (-not (Test-Path $NotesFile)) { Fail "notes file not found: $NotesFile" }
-    # Use ReadAllText, not Get-Content -Raw: the latter returns a string carrying
+    # ReadAllText, not Get-Content -Raw: the latter returns a string carrying
     # PSPath/PSDrive note properties, and ConvertTo-Json then serializes it as an
     # object instead of a string -> GitHub rejects body with 422.
     $body = [System.IO.File]::ReadAllText((Resolve-Path $NotesFile).Path,
@@ -249,8 +253,13 @@ try {
 } catch {
     Info "creating release"
     $releaseName = "Release $((Get-Date).ToString('yyyy.MM.dd')) $Tag"
-    $payload = @{ tag_name = $Tag; name = $releaseName; body = $body; draft = $false; prerelease = $false } |
-               ConvertTo-Json -Depth 5
+    $payload = @{
+        tag_name = $Tag
+        name     = $releaseName
+        body     = $body
+        draft    = $false
+        prerelease = $false
+    } | ConvertTo-Json -Depth 5
     $release = Invoke-RestMethod -Uri "$ApiBase/releases" -Headers $GhHeaders -Method Post `
         -ContentType "application/json; charset=utf-8" `
         -Body ([System.Text.Encoding]::UTF8.GetBytes($payload))
@@ -264,8 +273,8 @@ foreach ($asset in $release.assets) {
     }
 }
 
-$uploadUrl  = $release.upload_url -replace '\{.*\}', ''
-$uploadUri  = "$uploadUrl`?name=$AssetName"
+$uploadUrl = $release.upload_url -replace '\{.*\}', ''
+$uploadUri = "$uploadUrl`?name=$AssetName"
 Info "uploading $AssetName ($zipMb MB)"
 $bytes = [System.IO.File]::ReadAllBytes($ZipPath)
 $uploadHeaders = @{ Authorization = "token $Token"; "User-Agent" = "wtmv-release-script" }

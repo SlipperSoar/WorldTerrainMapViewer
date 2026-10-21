@@ -35,8 +35,37 @@ public static class WindowsBuild
         EditorApplication.Exit(exitCode);
     }
 
+    /// <summary>
+    /// 单独的编译检查入口：只判断脚本是否编译通过，不做构建。
+    /// 发布脚本可以先跑这个（快），再决定要不要进入耗时数分钟的构建。
+    /// </summary>
+    public static void CheckCompile()
+    {
+        if (EditorUtility.scriptCompilationFailed)
+        {
+            Debug.LogError("[Build] 脚本存在编译错误");
+            EditorApplication.Exit(1);
+            return;
+        }
+
+        Debug.Log("COMPILE_OK");
+        EditorApplication.Exit(0);
+    }
+
     private static int Run()
     {
+        // 先确认脚本真的编译过了。
+        //
+        // 踩过的坑：新增 .cs 后第一次 -batchmode 打开工程，Unity 的首次编译可能早于
+        // 新文件入库，于是报一片 CS0103；随后它自己又补了一遍编译并继续构建。
+        // 结果是「构建成功」但日志里带着编译错误 —— 分不清是构建了旧程序集还是新的。
+        // 这里显式检查，编译不通就直接失败，绝不产出可疑的包。
+        if (EditorUtility.scriptCompilationFailed)
+        {
+            Debug.LogError("[Build] 脚本存在编译错误，已中止（不会产出包）");
+            return 1;
+        }
+
         string projectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? ".";
         string outDir = Environment.GetEnvironmentVariable(OutputDirEnvVar);
         if (string.IsNullOrEmpty(outDir))

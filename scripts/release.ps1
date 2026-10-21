@@ -127,6 +127,31 @@ if (-not $SkipBuild) {
     if (Test-Path $logPath) { Remove-Item $logPath -Force }
 
     $env:WTMV_BUILD_DIR = $BuildDir
+
+    # 先单独确认脚本编译通过，避免"构建成功但编的是旧程序集"这种假成功
+    $checkLog = Join-Path $DistDir "compile-check.log"
+    if (Test-Path $checkLog) { Remove-Item $checkLog -Force }
+    $checkArgs = @(
+        "-batchmode", "-nographics", "-quit",
+        "-projectPath", "`"$RepoRoot`"",
+        "-executeMethod", "WindowsBuild.CheckCompile",
+        "-logFile", "`"$checkLog`""
+    )
+    Info "checking script compilation"
+    $check = Start-Process -FilePath $EditorPath -ArgumentList $checkArgs -Wait -PassThru -NoNewWindow
+    $checkOk = $false
+    if (Test-Path $checkLog) {
+        $checkOk = (Select-String -Path $checkLog -Pattern 'COMPILE_OK' -Quiet) -eq $true
+    }
+    if ($check.ExitCode -ne 0 -or -not $checkOk) {
+        if (Test-Path $checkLog) {
+            Select-String -Path $checkLog -Pattern 'error CS' | Select-Object -First 20 |
+                ForEach-Object { Write-Host ("    " + $_.Line) }
+        }
+        Fail "script compilation failed; see $checkLog"
+    }
+    Info "scripts compile OK"
+
     $editorArgs = @(
         "-batchmode", "-nographics", "-quit",
         "-projectPath", "`"$RepoRoot`"",
@@ -210,7 +235,11 @@ Step "GitHub Release $Tag"
 $body = ""
 if ($NotesFile) {
     if (-not (Test-Path $NotesFile)) { Fail "notes file not found: $NotesFile" }
-    $body = Get-Content $NotesFile -Raw -Encoding UTF8
+    # Use ReadAllText, not Get-Content -Raw: the latter returns a string carrying
+    # PSPath/PSDrive note properties, and ConvertTo-Json then serializes it as an
+    # object instead of a string -> GitHub rejects body with 422.
+    $body = [System.IO.File]::ReadAllText((Resolve-Path $NotesFile).Path,
+                                          [System.Text.Encoding]::UTF8)
 }
 
 $release = $null

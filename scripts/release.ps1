@@ -191,8 +191,10 @@ New-Item -ItemType Directory -Force -Path $DistDir | Out-Null
 if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+# includeBaseDirectory = $false: the exe must sit at the zip root, so users just
+# unzip and run. $true would nest everything under a "Build\" folder.
 [System.IO.Compression.ZipFile]::CreateFromDirectory(
-    $BuildDir, $ZipPath, [System.IO.Compression.CompressionLevel]::Optimal, $true)
+    $BuildDir, $ZipPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
 $zipMb = [math]::Round((Get-Item $ZipPath).Length / 1MB, 1)
 Info "zip: $ZipPath ($zipMb MB)"
 

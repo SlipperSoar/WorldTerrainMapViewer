@@ -46,7 +46,7 @@ namespace WorldTerrain
             ctx.Require(ctx.PlateIds != null, "PlateIds（板块归属）");
 
             // 群系判定用「海事」湿度场：副热带岛屿与海岸不该被陆地式的降水曲线判成荒漠
-            ctx.BiomeMoisture = ClimateModel.ComputeBiomeMoistureField(
+            ctx.BiomeMoisture = ClimateModel.ComputeMoistureField(
                 ctx.Width, ctx.Height, ctx.HeightField, ctx.Noise, ctx.Config.axialTilt);
 
             ctx.TerrainTypes = TerrainClassifier.Classify(

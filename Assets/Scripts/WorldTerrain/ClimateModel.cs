@@ -23,11 +23,20 @@ namespace WorldTerrain
         /// </summary>
         private const double ContinentalScaleKm = 1800.0;
 
+        /// <summary>植被蒸腾再循环的强度（每步按「水汽亏缺」的比例补充）。</summary>
+        private const double RecycleStrength = 0.08;
+
+        /// <summary>低于此湿度视为裸地，不再有水汽再循环。</summary>
+        private const double RecycleVegetationMin = 0.12;
+
+        /// <summary>从裸地到全覆盖植被的湿度过渡宽度（倒数）。</summary>
+        private const double RecycleVegetationInvSpan = 1.0 / 0.30;
+
         /// <summary>地球周长（公里），用于把格数换算成实际距离。</summary>
         private const double EarthCircumferenceKm = 40075.0;
 
         /// <summary>地形抬升的降水尺度（米）：上升这么多米，水汽大部分被拦下。</summary>
-        private const double OrographicScale = 900.0;
+        private const double OrographicScale = 1500.0;
 
         /// <summary>经度接缝抹平：每行越过末端后继续推进的格数（≈2 倍水汽衰减尺度）。</summary>
         private const int WrapExtraCells = 180;
@@ -287,29 +296,11 @@ namespace WorldTerrain
         public static float[] ComputeMoistureField(int width, int height, float[] heightField,
             SeededNoise noise, double axialTilt = 23.44, Action<float> onProgress = null)
         {
-            return ComputeMoistureCore(width, height, heightField, noise, axialTilt,
-                onProgress, maritime: false);
-        }
-
-        /// <summary>
-        /// 供**生物群系判定**使用的湿度场。
-        ///
-        /// 与 <see cref=ComputeMoistureField/> 的差别只有两点：
-        ///   1. 起点取「海面蒸发」供给（平缓曲线），而不是降水型曲线
-        ///   2. 副热带下沉只压陆地（<see cref=SubsidenceFactor/>）
-        ///
-        /// 这样副热带的**岛屿与海岸**不再被判成荒漠 —— 它们周围全是暖湿海面。
-        /// 地形 / 水文 / 侵蚀仍使用原来的降水型湿度场，所以地形数值不受影响。
-        /// </summary>
-        public static float[] ComputeBiomeMoistureField(int width, int height, float[] heightField,
-            SeededNoise noise, double axialTilt = 23.44, Action<float> onProgress = null)
-        {
-            return ComputeMoistureCore(width, height, heightField, noise, axialTilt,
-                onProgress, maritime: true);
+            return ComputeMoistureCore(width, height, heightField, noise, axialTilt, onProgress);
         }
 
         private static float[] ComputeMoistureCore(int width, int height, float[] heightField,
-            SeededNoise noise, double axialTilt, Action<float> onProgress, bool maritime)
+            SeededNoise noise, double axialTilt, Action<float> onProgress)
         {
             int w = width, h = height, n = w * h;
             float[] field = new float[n];
@@ -323,11 +314,13 @@ namespace WorldTerrain
             // 副热带降水虽被下沉气流压干，海洋本身仍在蒸发，否则纬度带上的岛屿会整片变荒漠。
             double[] rowCosLat = new double[h];
             double[] rowSinLat = new double[h];
+            double[] rowSeaSurface = new double[h];
             for (int y = 0; y < h; y++)
             {
                 double lat = Math.PI * 0.5 - (double)y / (h - 1) * Math.PI;
                 rowCosLat[y] = Math.Cos(lat);
                 rowSinLat[y] = Math.Sin(lat);
+                rowSeaSurface[y] = SeaSurfaceMoisture(Math.Abs(lat) * 180.0 / Math.PI, axialTilt);
             }
 
             // 逐行填充初值（每行只写自己那一行）；后面的带内推进仍是串行的，
@@ -335,9 +328,7 @@ namespace WorldTerrain
             Parallelism.ForRows(h, y =>
             {
                 double latDeg = 90.0 - (double)y / (h - 1) * 180.0;
-                float src = maritime
-                    ? (float)SeaSurfaceMoisture(Math.Abs(latDeg), axialTilt)
-                    : annualProfile[y];
+                float src = (float)SeaSurfaceMoisture(Math.Abs(latDeg), axialTilt);
                 int row = y * w;
                 for (int x = 0; x < w; x++)
                     field[row + x] = src;
@@ -382,7 +373,7 @@ namespace WorldTerrain
                     // 取该带中点的风向
                     WindAt(sign * (latLo + latHi) * 0.5, out double dx, out double dy);
                     MarchMoistureBand(w, h, heightField, field, y0, y1, dx, dy,
-                        noise, rowCosLat, rowSinLat, colCosLon, colSinLon);
+                        noise, rowCosLat, rowSinLat, colCosLon, colSinLon, rowSeaSurface);
 
                     done++;
                     onProgress?.Invoke(done / 6f);
@@ -394,10 +385,7 @@ namespace WorldTerrain
 
             // 副热带下沉气流：只压陆地，不压海面。
             // 放在推进之后做一次，避免沿路径反复相乘把整条纬度带抽干。
-            // 只在群系湿度场启用：地形侧的降水型场已经用降水曲线表达了副热带干旱，
-            // 再乘一次会把那一带彻底抽干（地形基线也会变）。
-            if (maritime)
-                ApplySubsidence(w, h, heightField, field, axialTilt);
+            ApplySubsidence(w, h, heightField, field, axialTilt);
 
             return field;
         }
@@ -474,7 +462,8 @@ namespace WorldTerrain
         /// </summary>
         private static void MarchMoistureBand(int w, int h, float[] heightField, float[] field,
             int yStart, int yEnd, double dx, double dy, SeededNoise noise,
-            double[] rowCosLat, double[] rowSinLat, double[] colCosLon, double[] colSinLon)
+            double[] rowCosLat, double[] rowSinLat, double[] colCosLon, double[] colSinLon,
+            double[] rowSeaSurface)
         {
             // 行序：让「上风侧」的行先被处理（经向分量在带内基本同向）
             bool yForward = dy >= 0.0;
@@ -530,14 +519,33 @@ namespace WorldTerrain
                     double sx = x - rowDx;
                     double sy = y - rowDy;
 
-                    double m = SampleField(field, w, h, sx, sy) * inlandRetention;
+                    double upwind = SampleField(field, w, h, sx, sy);
+                    double m = upwind * inlandRetention;
+
+                    // ── 植被蒸腾的水汽再循环 ──
+                    // 只靠大陆性衰减会把内陆抽成绝对零，真实世界不会这样：湿润地表的蒸腾
+                    // 把水汽送回空中，雨林约 30~40% 的降水来自本地蒸腾（亚马逊、刚果盆地）。
+                    // 这里按「水汽亏缺」补充：越接近该纬度的海面供给补充越少，
+                    // 因此天然收敛，不会把整块大陆推成雨林。
+                    double seaSurf = rowSeaSurface[y];
+                    if (upwind < seaSurf)
+                    {
+                        double veg = (upwind - RecycleVegetationMin) * RecycleVegetationInvSpan;
+                        if (veg > 0.0)
+                        {
+                            if (veg > 1.0) veg = 1.0;
+                            m += RecycleStrength * veg * (seaSurf - upwind);
+                        }
+                    }
 
                     // 迎风坡降水：抬升越猛，水汽被拦下越多；背风坡因此干旱（雨影）
                     float dh = heightField[i] - (float)SampleField(heightField, w, h, sx, sy);
                     if (dh > 0f)
                     {
+                        // 抬升一次最多拦下 55% 的水汽：原来 900 m 就削掉 85%，
+                        // 过一道山脊水汽就没了，整块大陆被雨影抽干（实测赤道带 35% 荒漠）。
                         double rainout = dh / OrographicScale;
-                        if (rainout > 0.85) rainout = 0.85;
+                        if (rainout > 0.55) rainout = 0.55;
                         m *= 1.0 - rainout;
                     }
 

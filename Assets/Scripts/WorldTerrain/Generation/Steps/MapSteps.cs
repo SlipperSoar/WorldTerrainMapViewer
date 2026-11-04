@@ -38,7 +38,7 @@ namespace WorldTerrain
     {
         public override string Name => "地形分类";
 
-        public override (float from, float to) ProgressSpan => (0.65f, 0.70f);
+        public override (float from, float to) ProgressSpan => (0.65f, 0.80f);
 
         protected override void Execute(TerrainContext ctx, Action<float> progress)
         {
@@ -71,7 +71,7 @@ namespace WorldTerrain
 
         public override string Name => "人文";
 
-        public override (float from, float to) ProgressSpan => (0.92f, 1.00f);
+        public override (float from, float to) ProgressSpan => (0.80f, 1.00f);
 
         protected override void Execute(TerrainContext ctx, Action<float> progress)
         {

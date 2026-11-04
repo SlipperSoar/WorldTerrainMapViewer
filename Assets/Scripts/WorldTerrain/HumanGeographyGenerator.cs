@@ -1328,7 +1328,7 @@ namespace WorldTerrain
             return hi - lo;
         }
 
-        private static int CountRiverNeighbours(int x, int y, int w, int h, bool[] mask)
+        private static int CountRiverNeighbours(int x, int y, int w, int h, System.Collections.BitArray mask)
         {
             if (mask == null)
                 return 0;
@@ -1343,7 +1343,7 @@ namespace WorldTerrain
             return count;
         }
 
-        private static bool NearbyFlag(int x, int y, int w, int h, bool[] mask, int radius)
+        private static bool NearbyFlag(int x, int y, int w, int h, System.Collections.BitArray mask, int radius)
         {
             if (mask == null)
                 return false;

@@ -142,22 +142,22 @@ namespace WorldTerrain
     public struct HydrologyData
     {
         /// <summary>河道掩膜（含加粗后的干流）</summary>
-        public bool[] riverMask;
+        public System.Collections.BitArray riverMask;
 
         /// <summary>湖泊掩膜（被填平的洼地）</summary>
-        public bool[] lakeMask;
+        public System.Collections.BitArray lakeMask;
 
         /// <summary>河宽（像素），合流变宽、分流变窄</summary>
         public float[] riverWidth;
 
         /// <summary>入海口（河流注入海洋的那一格）</summary>
-        public bool[] estuaryMask;
+        public System.Collections.BitArray estuaryMask;
 
         /// <summary>季节性河流掩膜（集水区平均湿度低于气候干旱阈值）</summary>
-        public bool[] seasonalMask;
+        public System.Collections.BitArray seasonalMask;
 
         /// <summary>三角洲分流河道掩膜（浅海中的扇形河道）</summary>
-        public bool[] deltaMask;
+        public System.Collections.BitArray deltaMask;
 
         /// <summary>有效流量（赤道等效格数），用于宽度与调试</summary>
         public float[] discharge;

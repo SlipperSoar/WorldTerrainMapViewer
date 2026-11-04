@@ -115,12 +115,12 @@ namespace WorldTerrain
 
             var data = new HydrologyData
             {
-                riverMask = new bool[n],
-                lakeMask = new bool[n],
+                riverMask = new System.Collections.BitArray(n),
+                lakeMask = new System.Collections.BitArray(n),
                 riverWidth = new float[n],
-                estuaryMask = new bool[n],
-                seasonalMask = new bool[n],
-                deltaMask = new bool[n],
+                estuaryMask = new System.Collections.BitArray(n),
+                seasonalMask = new System.Collections.BitArray(n),
+                deltaMask = new System.Collections.BitArray(n),
                 discharge = new float[n],
                 waterDepth = new float[n],
                 catchmentMoisture = new float[n]
@@ -391,7 +391,7 @@ namespace WorldTerrain
         /// 现在把盆地面积按行权重（cos lat）折算成「赤道等效格数」，门槛才对所有纬度一致。
         /// </summary>
         private static void MarkLakes(int w, int h, float[] heightField,
-            float[] filled, bool[] lakeMask, float[] waterDepth,
+            float[] filled, System.Collections.BitArray lakeMask, float[] waterDepth,
             SeededNoise noise, float[] moistureField, float[] rowMoistureBase)
         {
             int n = w * h;

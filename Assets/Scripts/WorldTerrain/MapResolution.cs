@@ -81,8 +81,11 @@ namespace WorldTerrain
         /// 实测标定（本机 24 逻辑核，含全部 12 个步骤，步骤间 GC 对大图开启）：
         ///   1024 → 62 MB、2048 → 277 MB、4096 → 420 MB、8192 → 1700 MB
         ///
-        /// 逐格数组合计约 57 字节/格（高度/湿度/径流/板块/分类各 4，水文各掩膜 25，三张 Color32 各 4），
-        /// 再加固定底噪 80 MB。**偏保守**：只用于判断要不要提醒用户，宁可高估。
+        /// 逐格数组合计约 **41 字节/格**（高度/湿度/径流/板块/分类各 4，水文各掩膜 21），
+        /// 再加固定底噪 128 MB。**偏保守**：只用于判断要不要提醒用户，宁可高估。
+        ///
+        /// 2.5.0 起：三张成品 Color32（12 B/格）与重复计算的群系湿度场（4 B/格）已移除 ——
+        /// 前者改为 <see cref="MapExporter"/> 按行带流式渲染，后者直接复用 <c>Moisture</c>。
         ///
         /// 注：三张彩色图从 <c>Color[]</c>（16 B/px）换成 <c>Color32[]</c>（4 B/px）后，
         /// 8192 档的峰值从 4.3 GB 降到 1.8 GB，所以这个估算也跟着重标定过。
@@ -90,7 +93,7 @@ namespace WorldTerrain
         public static long EstimatedPeakBytes(int width)
         {
             long cells = CellCount(width);
-            const int PerCellBytes = 57;
+            const int PerCellBytes = 41;
             const long FixedOverhead = 128L * 1024 * 1024;
             return cells * PerCellBytes + FixedOverhead;
         }

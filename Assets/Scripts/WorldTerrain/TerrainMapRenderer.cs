@@ -39,18 +39,32 @@ namespace WorldTerrain
         public static Color32[] RenderHeightMap(int width, int height, float[] heightField)
         {
             Color32[] colors = new Color32[width * height];
-            float minH = -10000f;
-            float maxH = 10000f;
-            float range = maxH - minH;
-
-            for (int i = 0; i < width * height; i++)
-            {
-                float t = (heightField[i] - minH) / range;
-                t = Math.Max(0f, Math.Min(1f, t));
-                colors[i] = Quantize(new Color(t, t, t, 1f));
-            }
-
+            RenderHeightRows(width, height, heightField, 0, height, colors, 0);
             return colors;
+        }
+
+        /// <summary>
+        /// 高度图的**按行带**渲染：把 [y0, y1) 行写进 <paramref name="dest"/>。
+        /// 供流式导出使用 —— 一次只留一条带，不再需要整幅 Color32[]。
+        /// </summary>
+        public static void RenderHeightRows(int width, int height, float[] heightField,
+            int y0, int y1, Color32[] dest, int destOffset)
+        {
+            const float minH = -10000f;
+            const float maxH = 10000f;
+            const float range = maxH - minH;
+
+            for (int y = y0; y < y1; y++)
+            {
+                int src = y * width;
+                int dst = destOffset + (y - y0) * width;
+                for (int x = 0; x < width; x++)
+                {
+                    float t = (heightField[src + x] - minH) / range;
+                    t = Math.Max(0f, Math.Min(1f, t));
+                    dest[dst + x] = Quantize(new Color(t, t, t, 1f));
+                }
+            }
         }
 
         /// <summary>
@@ -66,48 +80,84 @@ namespace WorldTerrain
             SeededNoise noise)
         {
             Color32[] colors = new Color32[width * height];
-            float[] relief = BuildReliefShade(width, height, heightField);
-
-            for (int y = 0; y < height; y++)
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    int i = y * width + x;
-                    colors[i] = Quantize(GetTerrainColor(
-                        heightField[i], terrainTypes[i],
-                        hydrology.riverWidth[i],
-                        hydrology.estuaryMask[i],
-                        relief[i],
-                        x, y, width, height, noise));
-                }
-            }
-
+            float reliefScale = ComputeReliefScale(width, height, heightField);
+            RenderTerrainRows(width, height, heightField, terrainTypes, hydrology, noise,
+                reliefScale, 0, height, colors, 0);
             return colors;
         }
 
         /// <summary>
-        /// 起伏阴影：用高度场的局部梯度模拟「西北向光照」，让群系色块有立体感。
-        /// 以全图最大梯度归一化，返回 0.88~1.12 的亮度系数（海洋不参与，按 1 处理）。
+        /// 彩色地形图的**按行带**渲染（流式导出的核心）。
+        ///
+        /// 起伏阴影不再预生成整幅 float[]：逐像素用上下左右邻格即时求梯度，
+        /// 归一化尺度由 <see cref="ComputeReliefScale"/> 事先算好传进来。
+        /// 这样 8192 档少一次 134 MB 的临时数组分配。
         /// </summary>
-        private static float[] BuildReliefShade(int width, int height, float[] heightField)
+        public static void RenderTerrainRows(int width, int height, float[] heightField,
+            TerrainType[] terrainTypes, HydrologyData hydrology, SeededNoise noise,
+            float reliefScale, int y0, int y1, Color32[] dest, int destOffset)
         {
-            float[] relief = new float[width * height];
-            if (width < 3 || height < 3)
+            for (int y = y0; y < y1; y++)
             {
-                for (int i = 0; i < relief.Length; i++)
-                    relief[i] = 1f;
-                return relief;
-            }
+                int yu = y > 0 ? y - 1 : 0;
+                int yd = y + 1 < height ? y + 1 : height - 1;
+                int row = y * width;
+                int rowUp = yu * width;
+                int rowDown = yd * width;
+                int dst = destOffset + (y - y0) * width;
 
-            // 归一化尺度取**陆地梯度的 95 分位**，而不是全图最大值：
-            // 海岸线上几千米的落差会把最大值顶到天上，导致内陆的起伏全被压成 0，
-            // 整张图看起来是平的（这是实测踩到的坑）。
-            var samples = new System.Collections.Generic.List<float>(height / 2 + 1);
-            for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                {
+                    int xl = x > 0 ? x - 1 : width - 1;
+                    int xr = x + 1 < width ? x + 1 : 0;
+
+                    float relief = ReliefAt(heightField, row, rowUp, rowDown, xl, x, xr,
+                                            reliefScale);
+
+                    dest[dst + x] = Quantize(GetTerrainColor(
+                        heightField[row + x], terrainTypes[row + x],
+                        hydrology.riverWidth[row + x],
+                        hydrology.estuaryMask[row + x],
+                        relief,
+                        x, y, width, height, noise));
+                }
+            }
+        }
+
+        /// <summary>单格起伏系数（与整幅预计算版本等价，但不占整幅内存）。</summary>
+        private static float ReliefAt(float[] heightField, int row, int rowUp, int rowDown,
+            int xl, int x, int xr, float reliefScale)
+        {
+            if (heightField[row + x] <= 0f)
+                return 1f;
+
+            float gx = heightField[row + xr] - heightField[row + xl];
+            float gy = heightField[rowDown + x] - heightField[rowUp + x];
+
+            const float Strength = 0.30f;
+            float d = (gy - gx) / reliefScale * Strength;
+            float slopeNorm = Math.Min(1f, (Math.Abs(gx) + Math.Abs(gy)) / reliefScale);
+            return Math.Max(0.72f, Math.Min(1.24f, 1f + d - slopeNorm * 0.16f));
+        }
+
+        /// <summary>
+        /// 起伏阴影的归一化尺度：**陆地梯度**的 95 分位（抽样估计，不建整幅数组）。
+        /// 用最大梯度会被海岸线的落差顶爆，内陆起伏全被压成 0（实测踩过的坑）。
+        /// </summary>
+        public static float ComputeReliefScale(int width, int height, float[] heightField)
+        {
+            if (width < 3 || height < 3)
+                return 1f;
+
+            // 抽样：最多取 1/16 的格子，避免为求分位再扫一遍全图
+            const int Step = 4;
+            var samples = new System.Collections.Generic.List<float>(height * width / (Step * Step) + 16);
+
+            for (int y = 0; y < height; y += Step)
             {
                 int yu = Math.Max(0, y - 1);
                 int yd = Math.Min(height - 1, y + 1);
-                for (int x = 0; x < width; x++)
+                for (int x = 0; x < width; x += Step)
                 {
                     int i = y * width + x;
                     if (heightField[i] <= 0f)
@@ -120,52 +170,18 @@ namespace WorldTerrain
                 }
             }
 
-            float maxGrad = 1f;
-            if (samples.Count > 0)
-            {
-                samples.Sort();
-                maxGrad = samples[Math.Min(samples.Count - 1, (int)(samples.Count * 0.95f))];
-                if (maxGrad <= 0f)
-                    maxGrad = 1f;
-            }
+            if (samples.Count == 0)
+                return 1f;
 
-            if (maxGrad <= 0f)
-            {
-                for (int i = 0; i < relief.Length; i++)
-                    relief[i] = 1f;
-                return relief;
-            }
-
-            const float Strength = 0.30f;
-            for (int y = 0; y < height; y++)
-            {
-                int yu = Math.Max(0, y - 1);
-                int yd = Math.Min(height - 1, y + 1);
-                for (int x = 0; x < width; x++)
-                {
-                    int i = y * width + x;
-                    if (heightField[i] <= 0f)
-                    {
-                        relief[i] = 1f;
-                        continue;
-                    }
-
-                    int xl = (x - 1 + width) % width;
-                    int xr = (x + 1) % width;
-                    float gx = heightField[y * width + xr] - heightField[y * width + xl];
-                    float gy = heightField[yd * width + x] - heightField[yu * width + x];
-
-                    // 方向项：光照来自西北，坡面朝西北变亮、朝东南变暗
-                    float d = (gy - gx) / maxGrad * Strength;
-                    // 坡度项：越陡越暗，让山脊与谷地在纯色群系上也能看出来
-                    float slopeNorm = Math.Min(1f, (Math.Abs(gx) + Math.Abs(gy)) / maxGrad);
-                    relief[i] = Math.Max(0.72f, Math.Min(1.24f, 1f + d - slopeNorm * 0.16f));
-                }
-            }
-
-            return relief;
+            samples.Sort();
+            float scale = samples[Math.Min(samples.Count - 1, (int)(samples.Count * 0.95f))];
+            return scale > 0f ? scale : 1f;
         }
 
+        /// <summary>
+        /// 起伏阴影：用高度场的局部梯度模拟「西北向光照」，让群系色块有立体感。
+        /// 以全图最大梯度归一化，返回 0.88~1.12 的亮度系数（海洋不参与，按 1 处理）。
+        /// </summary>
         /// <summary>
         /// Render the tectonic plate division map. Each plate gets a distinct
         /// color; plate boundaries (earthquake belts) are highlighted in
@@ -173,10 +189,21 @@ namespace WorldTerrain
         /// alpha so the underlying terrain is visible through the overlay.
         /// </summary>
         public static Color32[] RenderPlateMap(
-            int width, int height, int[] plateIds, bool transparent)
+            int width, int height, int[] plateIds,
+            bool transparent)
         {
             Color32[] colors = new Color32[width * height];
+            RenderPlateRows(width, height, plateIds, transparent, 0, height, colors, 0);
+            return colors;
+        }
 
+        /// <summary>
+        /// 板块分界图的**按行带**渲染（流式导出用）。
+        /// 调色板按板块总数一次生成（只有几十项），不随带宽增加内存。
+        /// </summary>
+        public static void RenderPlateRows(int width, int height, int[] plateIds, bool transparent,
+            int y0, int y1, Color32[] dest, int destOffset)
+        {
             int numPlates = 0;
             for (int i = 0; i < plateIds.Length; i++)
             {
@@ -187,7 +214,6 @@ namespace WorldTerrain
 
             Color[] palette = GeneratePlatePalette(numPlates);
 
-            // 8-neighbour offsets (x wraps, y clamps)
             int[] dx8 = { -1, 0, 1, -1, 1, -1, 0, 1 };
             int[] dy8 = { -1, -1, -1, 0, 0, 1, 1, 1 };
 
@@ -195,8 +221,9 @@ namespace WorldTerrain
             float interiorAlpha = transparent ? 0.03f : 1f;
             Color boundaryColor = new Color(1f, 0.95f, 0.5f, boundaryAlpha);
 
-            for (int y = 0; y < height; y++)
+            for (int y = y0; y < y1; y++)
             {
+                int dst = destOffset + (y - y0) * width;
                 for (int x = 0; x < width; x++)
                 {
                     int idx = y * width + x;
@@ -218,17 +245,15 @@ namespace WorldTerrain
 
                     if (isBoundary)
                     {
-                        colors[idx] = Quantize(boundaryColor);
+                        dest[dst + x] = Quantize(boundaryColor);
                     }
                     else
                     {
                         Color c = palette[plate];
-                        colors[idx] = Quantize(new Color(c.r, c.g, c.b, interiorAlpha));
+                        dest[dst + x] = Quantize(new Color(c.r, c.g, c.b, interiorAlpha));
                     }
                 }
             }
-
-            return colors;
         }
 
         private static Color[] GeneratePlatePalette(int count)

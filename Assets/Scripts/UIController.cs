@@ -37,6 +37,9 @@ public class UIController : MonoBehaviour
     private Slider _planetSizeSlider;
     private Label _planetSizeValue;
     private Toggle _retrogradeToggle;
+    private Toggle _exportHeightToggle;
+    private Toggle _exportPlatesToggle;
+    private Toggle _exportHumanToggle;
     private Slider _resolutionSlider;
     private Label _resolutionValue;
     private Label _resolutionHint;
@@ -144,6 +147,9 @@ public class UIController : MonoBehaviour
         // 侧边栏的「逆向自转」也是 UXML 里的 Toggle，同样要紧凑化 ——
         // 否则内置 label 的定宽 + 输入区 0 宽会把勾选框裁掉（见 CompactToggleInternals）
         MakeToggleCompact(_retrogradeToggle);
+        MakeToggleCompact(_exportHeightToggle);
+        MakeToggleCompact(_exportPlatesToggle);
+        MakeToggleCompact(_exportHumanToggle);
 
         // 布局自检：顶栏宽度超出可用空间时会压到右侧栏，这里一次性报出来
         _root.schedule.Execute(ReportTopBarLayout).StartingIn(200);
@@ -218,6 +224,9 @@ public class UIController : MonoBehaviour
         _planetSizeSlider = _root.Q<Slider>("planet-size-slider");
         _planetSizeValue = _root.Q<Label>("planet-size-value");
         _retrogradeToggle = _root.Q<Toggle>("retrograde-toggle");
+        _exportHeightToggle = _root.Q<Toggle>("export-height");
+        _exportPlatesToggle = _root.Q<Toggle>("export-plates");
+        _exportHumanToggle = _root.Q<Toggle>("export-human");
         _resolutionSlider = _root.Q<Slider>("resolution-slider");
         _resolutionValue = _root.Q<Label>("resolution-value");
         _resolutionHint = _root.Q<Label>("resolution-hint");
@@ -1515,6 +1524,14 @@ public class UIController : MonoBehaviour
             WorldTerrainGenerator.Instance.onProgress = OnGenerationProgress;
             WorldTerrainGenerator.Instance.onComplete = OnGenerationComplete;
             WorldTerrainGenerator.Instance.onError = OnGenerationError;
+            // 导出开关：地形图始终写（否则地图列表里加载不回来），其余三项按勾选
+            WorldTerrainGenerator.Instance.ExportOptions = new MapExportOptions
+            {
+                height = _exportHeightToggle == null || _exportHeightToggle.value,
+                plates = _exportPlatesToggle == null || _exportPlatesToggle.value,
+                human = _exportHumanToggle == null || _exportHumanToggle.value
+            };
+
             WorldTerrainGenerator.Instance.GenerateWorld(
                 seed, width, waterCoverage, axialTilt, planetRadiusKm, retrograde);
         }

@@ -38,6 +38,12 @@
                     <ui:Label text="自转方向" />
                     <ui:Toggle name="retrograde-toggle" label="逆向自转" value="false" />
                 </ui:VisualElement>
+                <ui:VisualElement name="export-row">
+                    <ui:Label text="导出" />
+                    <ui:Toggle name="export-height" label="高度图" value="true" />
+                    <ui:Toggle name="export-plates" label="板块图" value="true" />
+                    <ui:Toggle name="export-human" label="人文" value="true" />
+                </ui:VisualElement>
                 <ui:Button name="generate-button" text="生成新世界" />
                 <ui:Label name="gen-progress-label" />
             </ui:VisualElement>

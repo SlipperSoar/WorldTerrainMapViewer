@@ -39,8 +39,11 @@ namespace WorldTerrain
         }
 
         /// <summary>
-        /// 完整管线：板块 → 地形 → 气候 → 侵蚀 → 海平面 → 气候反馈 → 水文
-        /// → 分类 → 渲染（板块图/高度图/地形图） → 人文。
+        /// 完整管线：板块 → 地形 → 气候 → 侵蚀 → 海平面 → 气候反馈 → 水文 → 分类 → 人文。
+        ///
+        /// **渲染（板块图/高度图/地形图）已移出管线**：它们是纯输出，与生成语义无关，
+        /// 改由 <see cref="MapExporter"/> 在主线程按需、按行带流式生成。
+        /// 这样生成线程里不再常驻三张 Color32（8192 档共 384 MB）。
         /// </summary>
         public static GenerationPipeline CreateDefault()
         {
@@ -53,9 +56,6 @@ namespace WorldTerrain
                 .Add(new ClimateFeedbackStep())
                 .Add(new HydrologyStep())
                 .Add(new ClassificationStep())
-                .Add(new PlateOverlayStep())
-                .Add(new HeightMapStep())
-                .Add(new TerrainMapStep())
                 .Add(new HumanStep());
         }
 

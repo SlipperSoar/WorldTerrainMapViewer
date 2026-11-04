@@ -151,35 +151,6 @@ public static class MapStore
         return true;
     }
 
-    /// <summary>
-    /// 把一次生成的结果转成契约再落盘。
-    /// PNG 编码需要 Unity 主线程，所以这一步只能在主线程做。
-    /// </summary>
-    public static MapData FromResult(WorldGenResult result, string baseName)
-    {
-        if (result == null)
-            return null;
-
-        var data = new MapData
-        {
-            baseName = baseName,
-            axialTilt = result.axialTilt,
-            waterCoverage = result.waterCoverage,
-            planetRadiusKm = PlanetProfile.ClampRadiusKm(result.planetRadiusKm),
-            rotationRetrograde = result.rotationRetrograde,
-            seed = 0,                     // 由调用方按需覆盖（WorldGenResult 不带 seed）
-            generatedAt = DateTime.Now.ToString("o"),
-            width = result.width,
-            height = result.height,
-            human = result.human,
-            terrainPng = EncodePng(result.terrainColors, result.width, result.height, false),
-            heightPng = EncodePng(result.heightColors, result.width, result.height, true),
-            plateOverlayPng = EncodePng(result.plateOverlayColors, result.width, result.height, false)
-        };
-
-        return data;
-    }
-
     // ── 内部 ──
 
     private static byte[] ReadBytesOrNull(string path)
@@ -192,25 +163,6 @@ public static class MapStore
         {
             Debug.LogWarning($"MapStore: 读取失败 {path}：{e.Message}");
             return null;
-        }
-    }
-
-    private static byte[] EncodePng(Color32[] pixels, int width, int height, bool linear)
-    {
-        if (pixels == null || width <= 0 || height <= 0)
-            return null;
-
-        var tex = new Texture2D(width, height, TextureFormat.RGBA32, false, linear);
-        try
-        {
-            // SetPixels32 直接收 8 位数据，不需要 Unity 再做一次浮点→字节转换
-            tex.SetPixels32(pixels);
-            tex.Apply();
-            return tex.EncodeToPNG();
-        }
-        finally
-        {
-            UnityEngine.Object.Destroy(tex);
         }
     }
 

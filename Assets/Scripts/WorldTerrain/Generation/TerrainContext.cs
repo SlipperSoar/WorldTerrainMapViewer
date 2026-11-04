@@ -58,29 +58,14 @@ namespace WorldTerrain
         /// <summary>[地形] 球面径流场的成河阈值分位。</summary>
         public float SphereRunoffThreshold;
 
-        /// <summary>[气候] 最终的湿度场（0-1）。侵蚀与水文都依赖它。</summary>
+        /// <summary>[气候] 最终的湿度场（0-1）。侵蚀、水文与群系判定都依赖它。</summary>
         public float[] Moisture;
-
-        /// <summary>
-        /// 群系判定用的湿度场（海面蒸发 + 副热带下沉只压陆地）。
-        /// 与 <see cref=Moisture/> 分开：后者参与侵蚀/水文，改动会改地形。
-        /// </summary>
-        public float[] BiomeMoisture;
 
         /// <summary>[水文] 河道、湖泊、三角洲等掩膜。</summary>
         public HydrologyData Hydrology;
 
         /// <summary>[分类] 每像素的地形类型。</summary>
         public TerrainType[] TerrainTypes;
-
-        /// <summary>[渲染] 灰度高度图颜色。</summary>
-        public Color32[] HeightColors;
-
-        /// <summary>[渲染] 彩色地形图颜色。</summary>
-        public Color32[] TerrainColors;
-
-        /// <summary>[渲染] 板块分界叠加图颜色（含透明度）。</summary>
-        public Color32[] PlateOverlayColors;
 
         /// <summary>[人文] 聚落、国家、交通线与自然地名。</summary>
         public HumanGeographyData Human;
@@ -120,9 +105,6 @@ namespace WorldTerrain
                 heightField = HeightField,
                 plateIds = PlateIds,
                 terrainTypes = TerrainTypes,
-                heightColors = HeightColors,
-                terrainColors = TerrainColors,
-                plateOverlayColors = PlateOverlayColors,
                 axialTilt = Config.axialTilt,
                 waterCoverage = Config.waterCoverage,
                 planetRadiusKm = PlanetProfile.ClampRadiusKm(Config.planetRadiusKm),

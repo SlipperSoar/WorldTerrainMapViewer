@@ -45,78 +45,13 @@ namespace WorldTerrain
             ctx.Require(ctx.HeightField != null, "HeightField（高度场）");
             ctx.Require(ctx.PlateIds != null, "PlateIds（板块归属）");
 
-            // 群系判定用「海事」湿度场：副热带岛屿与海岸不该被陆地式的降水曲线判成荒漠
-            ctx.BiomeMoisture = ClimateModel.ComputeMoistureField(
-                ctx.Width, ctx.Height, ctx.HeightField, ctx.Noise, ctx.Config.axialTilt);
+            // 直接复用气候步骤算好的湿度场：两者输入完全相同，再算一遍纯属浪费
+            // （8192 档要多分配并计算一整份 134 MB 的 float[]）。
+            ctx.Require(ctx.Moisture != null, "Moisture（湿度场）");
 
             ctx.TerrainTypes = TerrainClassifier.Classify(
                 ctx.Width, ctx.Height, ctx.HeightField,
-                ctx.PlateIds, ctx.Hydrology, ctx.Noise, ctx.Config.axialTilt, ctx.BiomeMoisture);
-        }
-    }
-
-    /// <summary>
-    /// 步骤 9｜板块分界图（含透明度，既能落盘也能当叠加层）。
-    ///
-    /// 产物：<see cref="TerrainContext.PlateOverlayColors"/>。
-    /// 依赖：PlateIds。
-    /// </summary>
-    public sealed class PlateOverlayStep : GenerationStep
-    {
-        public override string Name => "板块分界图";
-
-        public override (float from, float to) ProgressSpan => (0.70f, 0.75f);
-
-        protected override void Execute(TerrainContext ctx, Action<float> progress)
-        {
-            ctx.Require(ctx.PlateIds != null, "PlateIds（板块归属）");
-
-            ctx.PlateOverlayColors = TerrainMapRenderer.RenderPlateMap(
-                ctx.Width, ctx.Height, ctx.PlateIds, true);
-        }
-    }
-
-    /// <summary>
-    /// 步骤 10｜灰度高度图（供地形凹凸位移使用）。
-    ///
-    /// 产物：<see cref="TerrainContext.HeightColors"/>。
-    /// 依赖：HeightField。
-    /// </summary>
-    public sealed class HeightMapStep : GenerationStep
-    {
-        public override string Name => "高度图";
-
-        public override (float from, float to) ProgressSpan => (0.75f, 0.82f);
-
-        protected override void Execute(TerrainContext ctx, Action<float> progress)
-        {
-            ctx.Require(ctx.HeightField != null, "HeightField（高度场）");
-
-            ctx.HeightColors = TerrainMapRenderer.RenderHeightMap(
-                ctx.Width, ctx.Height, ctx.HeightField);
-        }
-    }
-
-    /// <summary>
-    /// 步骤 11｜彩色地形图（按海拔分层设色 + 水系/冰盖叠加）。
-    ///
-    /// 产物：<see cref="TerrainContext.TerrainColors"/>。
-    /// 依赖：HeightField、TerrainTypes、Hydrology。
-    /// </summary>
-    public sealed class TerrainMapStep : GenerationStep
-    {
-        public override string Name => "地形图";
-
-        public override (float from, float to) ProgressSpan => (0.82f, 0.92f);
-
-        protected override void Execute(TerrainContext ctx, Action<float> progress)
-        {
-            ctx.Require(ctx.HeightField != null, "HeightField（高度场）");
-            ctx.Require(ctx.TerrainTypes != null, "TerrainTypes（地形分类）");
-
-            ctx.TerrainColors = TerrainMapRenderer.RenderTerrainMap(
-                ctx.Width, ctx.Height, ctx.HeightField,
-                ctx.TerrainTypes, ctx.Hydrology, ctx.Noise);
+                ctx.PlateIds, ctx.Hydrology, ctx.Noise, ctx.Config.axialTilt, ctx.Moisture);
         }
     }
 

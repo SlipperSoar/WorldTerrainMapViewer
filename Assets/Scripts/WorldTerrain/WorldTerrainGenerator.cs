@@ -35,7 +35,10 @@ public class WorldTerrainGenerator : MonoBehaviour
 
     private volatile float generationProgress;
     private volatile string generationError;
-    private volatile WorldGenResult generationResult;
+    private volatile TerrainContext generationContext;
+
+    /// <summary>导出开关（是否写高度图 / 板块图 / 人文 JSON）。地形图始终写。</summary>
+    public MapExportOptions ExportOptions { get; set; } = MapExportOptions.All;
     private volatile bool isGenerating;
 
     #endregion
@@ -146,7 +149,7 @@ public class WorldTerrainGenerator : MonoBehaviour
 
         generationProgress = 0f;
         generationError = null;
-        generationResult = null;
+        generationContext = null;
         isGenerating = true;
 
         // ── Launch background thread for heavy computation ──
@@ -175,48 +178,73 @@ public class WorldTerrainGenerator : MonoBehaviour
             yield break;
         }
 
-        var result = generationResult;
-        if (result == null)
+        TerrainContext ctx = generationContext;
+        if (ctx == null)
         {
             Debug.LogError("World generation produced no result.");
             onError?.Invoke("No result");
             yield break;
         }
 
-        // ── 主线程：把结果整理成 MapData 契约，落盘 ──
-        // 落盘/读取都走 MapStore，生成器与查看器不再各自拼文件名。
+        // ── 主线程：流式导出（按行带渲染 → 直接编码写盘）──
+        //
+        // 不再生成整幅 Color32[]：8192 档三张合计 384 MB，而且还要再拷进贴图、
+        // 再编码成 PNG，同一份像素会同时存在三份。现在一条带只有 8 MB。
         string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         string seedStr = seed > 0 ? seed.ToString() : "rnd";
         string baseName = $"gen_{seedStr}_{timestamp}";
+        MapStore.Paths paths = MapStore.GetPaths(baseName);
 
-        MapData map = MapStore.FromResult(result, baseName);
-        map.seed = seed;
-        map.axialTilt = config.axialTilt;
-        map.waterCoverage = config.waterCoverage;
+        Texture2D terrainTex = ExportLayer(ctx, MapLayer.Terrain, paths.terrain);
+        Texture2D heightTex = ExportOptions.height
+            ? ExportLayer(ctx, MapLayer.Height, paths.height)
+            : null;
+        Texture2D overlayTex = ExportOptions.plates
+            ? ExportLayer(ctx, MapLayer.Plates, paths.plates)
+            : null;
 
-        if (!MapStore.Save(map))
+        if (terrainTex == null)
         {
-            string error = $"保存地图失败（{baseName}）";
+            string error = $"导出地形图失败（{baseName}）";
             Debug.LogError(error);
             onError?.Invoke(error);
             ReleaseGenerationResult();
             yield break;
         }
 
-        // ── 主线程：为显示创建贴图（与落盘无关，落盘用的是契约里的 PNG 字节）──
-        Texture2D heightTex = CreateTexture(result.heightColors, result.width, result.height, true);
-        Texture2D terrainTex = CreateTexture(result.terrainColors, result.width, result.height, false);
-        Texture2D overlayTex = CreateTexture(result.plateOverlayColors, result.width, result.height, false);
+        // 元数据与人文
+        MapMetaData.Save(baseName, new MapMetaData
+        {
+            axialTilt = config.axialTilt,
+            waterCoverage = config.waterCoverage,
+            seed = seed,
+            planetRadiusKm = PlanetProfile.ClampRadiusKm(config.planetRadiusKm),
+            rotationRetrograde = config.rotationRetrograde,
+            mapWidth = ctx.Width,
+            mapHeight = ctx.Height,
+            generatedAt = DateTime.Now.ToString("o"),
+            human = HumanMapSummary.From(ctx.Human)
+        });
+
+        if (ExportOptions.human && ctx.Human != null)
+            HumanGeographyData.Save(baseName, ctx.Human);
 
         // ── 应用到星球 ──
         if (EarthManager.Instance != null)
         {
             EarthManager.Instance.SetEarthSurface(terrainTex);
-            EarthManager.Instance.SetEarthHeightMap(heightTex);
-            EarthManager.Instance.SetPlateOverlay(overlayTex);
 
-            // 生成完立刻把人文图层叠加上去
-            EarthManager.Instance.SetHumanGeography(result.human, baseName);
+            if (heightTex != null)
+                EarthManager.Instance.SetEarthHeightMap(heightTex);
+            else
+                EarthManager.Instance.ClearEarthHeightMap();
+
+            if (overlayTex != null)
+                EarthManager.Instance.SetPlateOverlay(overlayTex);
+            else
+                EarthManager.Instance.SetPlateOverlayVisible(false);
+
+            EarthManager.Instance.SetHumanGeography(ctx.Human, baseName);
         }
         else
         {
@@ -253,19 +281,25 @@ public class WorldTerrainGenerator : MonoBehaviour
     /// </summary>
     private void ReleaseGenerationResult()
     {
-        generationResult = null;
+        generationContext = null;
     }
 
-    /// <summary>把颜色数组做成显示用贴图（等距圆柱图：横向重复、双线性过滤）。</summary>
-    private static Texture2D CreateTexture(Color32[] pixels, int width, int height, bool linear)
+    /// <summary>
+    /// 导出一层：按行带渲染成贴图 → 编码写盘 → 释放 CPU 侧像素，返回可显示贴图。
+    /// 写盘失败不阻断生成（贴图仍然可用于显示），只在日志里报错。
+    /// </summary>
+    private static Texture2D ExportLayer(TerrainContext ctx, MapLayer layer, string path)
     {
-        var tex = new Texture2D(width, height, TextureFormat.RGBA32, false, linear);
-        tex.SetPixels32(pixels);
+        Texture2D tex = MapExporter.RenderTextureReadable(ctx, layer);
+        if (tex == null)
+            return null;
+
         tex.filterMode = FilterMode.Bilinear;
         tex.wrapMode = TextureWrapMode.Repeat;
 
-        // makeNoLongerReadable: true —— 释放 CPU 侧像素副本。
-        // 显示用贴图只需要 GPU 那份，8192 档每张省 134 MB（三层共省约 400 MB）。
+        MapExporter.WriteTexturePng(tex, path);
+
+        // 显示只需要 GPU 那份：释放 CPU 侧像素（8192 档每张省 128 MB）
         tex.Apply(false, true);
         return tex;
     }
@@ -281,10 +315,10 @@ public class WorldTerrainGenerator : MonoBehaviour
     {
         try
         {
-            WorldGenResult result = TerrainGenerator.Generate(
+            TerrainContext ctx = TerrainGenerator.GenerateContext(
                 config, p => generationProgress = p);
 
-            generationResult = result;
+            generationContext = ctx;
             generationProgress = 1.0f;
         }
         catch (Exception e)

@@ -69,6 +69,9 @@ public static class GenerationProbe
             Debug.Log($"[probe] 导出耗时 {sw.Elapsed.TotalSeconds:F1} s，导出期间托管峰值 {MB(exportPeak)}");
             Debug.Log($"[probe] Unity 已分配 {MB(UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong())}，" +
                       $"峰值托管 {MB(Math.Max(peak, exportPeak))}");
+            VerifyPublishFlow();
+            VerifyRecipeDeterminism();
+
             Debug.Log("PROBE_OK");
             EditorApplication.Exit(0);
         }
@@ -76,6 +79,69 @@ public static class GenerationProbe
         {
             Debug.LogError("[probe] 失败：" + e);
             EditorApplication.Exit(1);
+        }
+
+
+        /// <summary>
+        /// 验证「只存配方 / 导出整包」这条链路：
+        ///   1. SaveRecipe 后应当只有 _meta.json，没有 PNG
+        ///   2. ExportFull 后五件套齐全（地形/高度/板块/人文/meta）
+        /// </summary>
+        static void VerifyPublishFlow()
+        {
+            var recipe = MapRecipe.FromParameters(20260801, 1024, 0.6f, 23.44f, 6371f, false);
+            TerrainContext ctx = TerrainGenerator.GenerateContext(recipe.ToConfig());
+
+            string name = "probe_publish";
+            MapStore.Paths paths = MapStore.GetPaths(name);
+
+            foreach (string f in new[] { paths.terrain, paths.height, paths.plates, paths.human, paths.meta })
+                if (File.Exists(f)) File.Delete(f);
+
+            bool saved = MapPublisher.SaveRecipe(ctx, recipe, name);
+            bool metaOnly =
+                File.Exists(paths.meta) &&
+                !File.Exists(paths.terrain) && !File.Exists(paths.height) && !File.Exists(paths.plates);
+            Debug.Log($"[probe] SaveRecipe={saved} 只有 meta={metaOnly}");
+
+            bool exported = MapPublisher.ExportFull(ctx, recipe, name, MapExportOptions.All);
+            bool full =
+                File.Exists(paths.terrain) && File.Exists(paths.height) &&
+                File.Exists(paths.plates) && File.Exists(paths.human) && File.Exists(paths.meta);
+            long size = File.Exists(paths.terrain) ? new FileInfo(paths.terrain).Length : 0;
+            Debug.Log($"[probe] ExportFull={exported} 五件套齐全={full} 地形图={size / 1024} KB");
+
+            // 清理，避免污染 StreamingAssets
+            foreach (string f in new[] { paths.terrain, paths.height, paths.plates, paths.human, paths.meta })
+                if (File.Exists(f)) File.Delete(f);
+        }
+
+        /// <summary>
+        /// 同一份整型配方生成两次，高度场必须逐位相同 —— 这是「重建 = 首次生成」的依据。
+        /// </summary>
+        static void VerifyRecipeDeterminism()
+        {
+            var recipe = MapRecipe.FromParameters(20260801, 1024, 0.6f, 23.44f, 6371f, false);
+
+            float[] a = TerrainGenerator.GenerateContext(recipe.ToConfig()).HeightField;
+            float[] b = TerrainGenerator.GenerateContext(recipe.ToConfig()).HeightField;
+
+            bool same = a != null && b != null && a.Length == b.Length;
+            long firstDiff = -1;
+            if (same)
+            {
+                for (int i = 0; i < a.Length; i++)
+                {
+                    if (BitConverter.SingleToInt32Bits(a[i]) != BitConverter.SingleToInt32Bits(b[i]))
+                    {
+                        same = false;
+                        firstDiff = i;
+                        break;
+                    }
+                }
+            }
+
+            Debug.Log($"[probe] 配方重建逐位一致={same}（首个差异格 {(firstDiff < 0 ? "无" : firstDiff.ToString())}）");
         }
 
         static string MB(long bytes) => $"{bytes / 1024.0 / 1024.0:F0} MB";

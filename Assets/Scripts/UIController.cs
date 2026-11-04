@@ -1180,6 +1180,11 @@ public class UIController : MonoBehaviour
             WorldTerrainGenerator.Instance.onProgress = OnGenerationProgress;
             WorldTerrainGenerator.Instance.onComplete = OnGenerationComplete;
             WorldTerrainGenerator.Instance.onError = OnGenerationError;
+            WorldTerrainGenerator.Instance.ShowPlateOverlay =
+                _plateOverlayToggle != null && _plateOverlayToggle.value;
+            WorldTerrainGenerator.Instance.ShowHumanOverlay =
+                _humanOverlayToggle != null && _humanOverlayToggle.value;
+
             WorldTerrainGenerator.Instance.GenerateFromRecipe(meta.ToRecipe(), recipeBaseName);
             return;
         }
@@ -1259,12 +1264,11 @@ public class UIController : MonoBehaviour
         // ── 人文图层（可选）──
         if (Application.isPlaying && EarthManager.Instance != null)
         {
-            // 默认不显示人文
-            bool showHuman = _humanOverlayToggle != null && _humanOverlayToggle.value;
-            if (showHuman)
-                EarthManager.Instance.SetHumanGeography(map.human, baseName);
-            else
-                EarthManager.Instance.ClearHumanGeography();
+            // 默认不显示人文：**建好再隐藏**，而不是销毁 ——
+            // 销毁后用户把开关打开就再也看不到（开关回调只切可见性）。
+            EarthManager.Instance.SetHumanGeography(map.human, baseName);
+            EarthManager.Instance.SetHumanOverlayVisible(
+                _humanOverlayToggle != null && _humanOverlayToggle.value);
         }
 
         Debug.Log($"已载入地图 {map}");
@@ -1656,6 +1660,12 @@ public class UIController : MonoBehaviour
                 plates = _exportPlatesToggle == null || _exportPlatesToggle.value,
                 human = _exportHumanToggle == null || _exportHumanToggle.value
             };
+
+            // 把两个图层的开关状态一起带过去，否则生成后会被重新点亮
+            WorldTerrainGenerator.Instance.ShowPlateOverlay =
+                _plateOverlayToggle != null && _plateOverlayToggle.value;
+            WorldTerrainGenerator.Instance.ShowHumanOverlay =
+                _humanOverlayToggle != null && _humanOverlayToggle.value;
 
             WorldTerrainGenerator.Instance.GenerateWorld(
                 seed, width, waterCoverage, axialTilt, planetRadiusKm, retrograde);

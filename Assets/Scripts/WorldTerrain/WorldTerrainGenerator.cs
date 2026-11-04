@@ -50,6 +50,15 @@ public class WorldTerrainGenerator : MonoBehaviour
 
     /// <summary>导出开关（是否写高度图 / 板块图 / 人文 JSON）。地形图始终写。</summary>
     public MapExportOptions ExportOptions { get; set; } = MapExportOptions.All;
+
+    /// <summary>
+    /// 生成后是否显示断层带。由 UI 在生成前同步过来 ——
+    /// 生成流程会重建叠加层，不同步的话「界面关着、星球上却显示」。
+    /// </summary>
+    public bool ShowPlateOverlay { get; set; }
+
+    /// <summary>生成后是否显示人文图层（同上）。</summary>
+    public bool ShowHumanOverlay { get; set; }
     private volatile bool isGenerating;
 
     #endregion
@@ -159,6 +168,8 @@ public class WorldTerrainGenerator : MonoBehaviour
         else EarthManager.Instance.SetPlateOverlayVisible(false);
 
         EarthManager.Instance.SetHumanGeography(ctx.Human, baseName);
+        EarthManager.Instance.SetPlateOverlayVisible(overlayTex != null && ShowPlateOverlay);
+        EarthManager.Instance.SetHumanOverlayVisible(ShowHumanOverlay);
 
         lastBaseName = baseName;
         onComplete?.Invoke(MapStore.GetPaths(baseName).terrain);
@@ -317,6 +328,10 @@ public class WorldTerrainGenerator : MonoBehaviour
                 EarthManager.Instance.SetPlateOverlayVisible(false);
 
             EarthManager.Instance.SetHumanGeography(ctx.Human, baseName);
+
+            // 与界面开关同步：叠加层刚被重建，必须按开关状态决定显示与否
+            EarthManager.Instance.SetPlateOverlayVisible(overlayTex != null && ShowPlateOverlay);
+            EarthManager.Instance.SetHumanOverlayVisible(ShowHumanOverlay);
         }
         else
         {

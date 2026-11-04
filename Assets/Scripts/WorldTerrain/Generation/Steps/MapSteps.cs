@@ -25,6 +25,14 @@ namespace WorldTerrain
                 ctx.Width, ctx.Height, ctx.HeightField, ctx.Noise,
                 Map(progress), ctx.Moisture,
                 ctx.SphereRunoff, ctx.SphereRunoffThreshold, ctx.Config.axialTilt);
+
+            // 诊断场用完即弃：这两个数组之后没有任何步骤读取
+            // （水文内部用于季节河判定与三角洲传播）。8192 档共省约 268 MB。
+            if (!ctx.Config.keepHydrologyDiagnostics)
+            {
+                ctx.Hydrology.discharge = null;
+                ctx.Hydrology.catchmentMoisture = null;
+            }
         }
     }
 

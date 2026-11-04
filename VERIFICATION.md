@@ -1301,13 +1301,14 @@ dotnet build planetcheck.csproj -c Release
 | HydrologyData 布尔掩膜 → BitArray | ✅ 完成 | 5 B/格 → 0.625 B/格；生成峰值 728 → **693 MB** |
 | TerrainType[] → yte[] | ✅ 完成 | 4 → 1 B/格；4096 峰值 361 → **337 MB** |
 | plateIds int[] → ushort[] | ✅ 完成 | 4 → 2 B/格；4096 峰值 337 → **321 MB** |
-| 导出专用浮点量按需化 | 待做 | 16 B/格（
-iverWidth/discharge/waterDepth/catchmentMoisture） |
+| 诊断浮点量用完即弃 | ✅ 完成 | discharge / catchmentMoisture 只在水文内部使用，步骤结束即释放（默认）；8192 档省 268 MB |
 
-**B 小计**：逐格 41 → **32 字节**；4096 峰值 396 → **321 MB**（−19%）；8192 峰值
-**1.37 GB → 1080 MB**（−21%）。距「8192 < 1 GB」还差约 80 MB —— 剩余空间在四个水文浮点数组
-（各 4 B/格）。把它们改成 ushort 定标或按需生成即可跨过 1 GB，但会牵动 HydrologyGenerator
-的多趟写入与人文/渲染的读取，留到下一轮单独做。
+**B 小计（2.7.0 最终）**：逐格 41 → **24 字节**（不含固定底噪时为 21.7 B/格）；
+4096 峰值 396 → **257 MB**（−35%）；**8192 峰值 1.37 GB → 824 MB（−40%，已进 1 GB 内）**。
+
+关键一步是把 discharge 与 catchmentMoisture 认定为「只在水文内部使用的诊断量」：
+它们不参与分类、渲染或人文，水文步骤结束即可释放（8192 档共 268 MB）。
+验证台需要 dump 时通过 WorldGenConfig.keepHydrologyDiagnostics = true 保留。
 
 **一致性**：B2/B3 后 11 个 dump 仍与基线逐位一致，群系分布（陆地 110549 格）与
 地形图颜色指纹（D0671A92…）均未变化。

@@ -81,7 +81,8 @@ namespace WorldTerrain
         /// 实测标定（本机 24 逻辑核，含全部 12 个步骤，步骤间 GC 对大图开启）：
         ///   1024 → 62 MB、2048 → 277 MB、4096 → 420 MB、8192 → 1700 MB
         ///
-        /// 逐格数组合计约 **32 字节/格**（高度/湿度/径流各 4，板块 2，分类 1，水文浮点 16，掩膜位图 0.6），
+        /// 逐格数组合计约 **24 字节/格**（高度/湿度/径流各 4，板块 2，分类 1，水文浮点 8，掩膜位图 0.6；
+        /// 诊断用的 discharge / catchmentMoisture 默认在水文步骤结束时释放），
         /// 再加固定底噪 128 MB。**偏保守**：只用于判断要不要提醒用户，宁可高估。
         ///
         /// 2.5.0 起：三张成品 Color32（12 B/格）与重复计算的群系湿度场（4 B/格）已移除 ——
@@ -93,7 +94,7 @@ namespace WorldTerrain
         public static long EstimatedPeakBytes(int width)
         {
             long cells = CellCount(width);
-            const int PerCellBytes = 32;
+            const int PerCellBytes = 24;
             const long FixedOverhead = 128L * 1024 * 1024;
             return cells * PerCellBytes + FixedOverhead;
         }

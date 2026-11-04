@@ -87,6 +87,13 @@ namespace WorldTerrain
         /// true：沿用旧的「直接在矩形网格上生成」路径，便于对比与回退。
         /// </summary>
         public bool planarGeneration;
+
+        /// <summary>
+        /// 保留水文诊断场（<c>discharge</c> / <c>catchmentMoisture</c>）。
+        /// 默认关闭：这两个数组在生成过程中只被水文自己使用，之后没有任何消费者，
+        /// 关掉后水文步骤一结束就释放（8192 档各 134 MB）。验证台需要 dump 时才打开。
+        /// </summary>
+        public bool keepHydrologyDiagnostics;
     }
 
     /// <summary>

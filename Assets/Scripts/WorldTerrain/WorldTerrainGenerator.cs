@@ -220,6 +220,8 @@ public class WorldTerrainGenerator : MonoBehaviour
             seed = seed,
             planetRadiusKm = PlanetProfile.ClampRadiusKm(config.planetRadiusKm),
             rotationRetrograde = config.rotationRetrograde,
+            // 新写出的 PNG 由 PngStreamWriter 按「上北下南」生成
+            pngNorthUp = true,
             mapWidth = ctx.Width,
             mapHeight = ctx.Height,
             generatedAt = DateTime.Now.ToString("o"),
@@ -290,17 +292,13 @@ public class WorldTerrainGenerator : MonoBehaviour
     /// </summary>
     private static Texture2D ExportLayer(TerrainContext ctx, MapLayer layer, string path)
     {
-        Texture2D tex = MapExporter.RenderTextureReadable(ctx, layer);
+        // 一次遍历同时产出贴图（北极在第 0 行，给着色器）与 PNG（上北下南，给人看）
+        Texture2D tex = MapExporter.ExportLayer(ctx, layer, path);
         if (tex == null)
             return null;
 
         tex.filterMode = FilterMode.Bilinear;
         tex.wrapMode = TextureWrapMode.Repeat;
-
-        MapExporter.WriteTexturePng(tex, path);
-
-        // 显示只需要 GPU 那份：释放 CPU 侧像素（8192 档每张省 128 MB）
-        tex.Apply(false, true);
         return tex;
     }
 

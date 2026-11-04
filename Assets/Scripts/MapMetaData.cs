@@ -33,6 +33,12 @@ public class MapMetaData
     /// <summary>是否逆向自转（时间流转时太阳反向绕行）。缺省 = 顺向。</summary>
     public bool rotationRetrograde;
 
+    /// <summary>
+    /// 该地图的 PNG 是否**上北下南**（2.8.0 起为 true）。
+    /// 老地图（缺省 false）是 Unity 的贴图行序，即南北颠倒；载入时需要区别对待。
+    /// </summary>
+    public bool pngNorthUp;
+
     /// <summary>地图宽度（像素）。</summary>
     public int mapWidth;
 

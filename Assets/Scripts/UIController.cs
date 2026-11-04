@@ -1157,7 +1157,7 @@ public class UIController : MonoBehaviour
         }
 
         // ── 彩色地形图（必需）──
-        Texture2D terrainTex = DecodeTexture(map.terrainPng, false);
+        Texture2D terrainTex = DecodeTexture(map.terrainPng, false, map.pngNorthUp);
         if (terrainTex == null)
         {
             Debug.LogError($"地形图解码失败：{filePath}");
@@ -1170,14 +1170,14 @@ public class UIController : MonoBehaviour
         EarthManager.Instance.SetEarthSurface(terrainTex);
 
         // ── 高度图（可选：没有就不做地形凹凸）──
-        Texture2D heightTex = map.HasHeight ? DecodeTexture(map.heightPng, true) : null;
+        Texture2D heightTex = map.HasHeight ? DecodeTexture(map.heightPng, true, map.pngNorthUp) : null;
         if (heightTex != null)
             EarthManager.Instance.SetEarthHeightMap(heightTex);
         else
             EarthManager.Instance.ClearEarthHeightMap();
 
         // ── 板块分界叠加图（可选）──
-        Texture2D plateTex = map.HasPlateOverlay ? DecodeTexture(map.plateOverlayPng, false) : null;
+        Texture2D plateTex = map.HasPlateOverlay ? DecodeTexture(map.plateOverlayPng, false, map.pngNorthUp) : null;
         if (plateTex != null)
             EarthManager.Instance.SetPlateOverlay(plateTex);
         else
@@ -1200,7 +1200,7 @@ public class UIController : MonoBehaviour
     }
 
     /// <summary>把 PNG 字节解成贴图；失败返回 null。</summary>
-    private static Texture2D DecodeTexture(byte[] png, bool linear)
+    private static Texture2D DecodeTexture(byte[] png, bool linear, bool northUp)
     {
         if (png == null || png.Length == 0)
             return null;
@@ -1212,6 +1212,11 @@ public class UIController : MonoBehaviour
             return null;
         }
 
+        // PNG 是「上北下南」，而 Unity 的 uv.y=0（贴图第 0 行）对应北极。
+        // LoadImage 把图像最后一行放到第 0 行，所以上北下南的文件需要再翻一次。
+        if (northUp)
+            FlipVertical(tex);
+
         tex.filterMode = FilterMode.Bilinear;
         tex.wrapMode = TextureWrapMode.Repeat;
 
@@ -1219,6 +1224,24 @@ public class UIController : MonoBehaviour
         // 8192 档每张省 134 MB，地形/高度/板块三层共省约 400 MB。
         tex.Apply(false, true);
         return tex;
+    }
+
+    /// <summary>把贴图上下翻转（原地，按行交换）。</summary>
+    private static void FlipVertical(Texture2D tex)
+    {
+        int w = tex.width, h = tex.height;
+        Color32[] px = tex.GetPixels32();
+        var tmp = new Color32[w];
+        for (int y = 0; y < h / 2; y++)
+        {
+            int top = y * w;
+            int bottom = (h - 1 - y) * w;
+            System.Array.Copy(px, top, tmp, 0, w);
+            System.Array.Copy(px, bottom, px, top, w);
+            System.Array.Copy(tmp, 0, px, bottom, w);
+        }
+        tex.SetPixels32(px);
+        tex.Apply(false, false);
     }
 
     #endregion

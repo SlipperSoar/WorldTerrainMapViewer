@@ -80,6 +80,7 @@ public static class MapStore
             data.seed = meta.seed;
             data.planetRadiusKm = meta.planetRadiusKm;
             data.rotationRetrograde = meta.rotationRetrograde;
+            data.pngNorthUp = meta.pngNorthUp;
             data.generatedAt = meta.generatedAt;
             data.width = meta.mapWidth;
             data.height = meta.mapHeight;
@@ -137,6 +138,7 @@ public static class MapStore
             seed = data.seed,
             planetRadiusKm = PlanetProfile.ClampRadiusKm(data.planetRadiusKm),
             rotationRetrograde = data.rotationRetrograde,
+            pngNorthUp = data.pngNorthUp,
             mapWidth = data.width,
             mapHeight = data.height,
             generatedAt = string.IsNullOrEmpty(data.generatedAt)

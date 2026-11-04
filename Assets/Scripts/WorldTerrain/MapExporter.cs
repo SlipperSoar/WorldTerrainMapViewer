@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using UnityEngine;
 
 namespace WorldTerrain
@@ -15,120 +14,151 @@ namespace WorldTerrain
     /// <summary>
     /// 生成结果 → 贴图 / PNG 的**流式导出器**。
     ///
-    /// 设计要点（为什么不再一次性生成整幅 <c>Color32[]</c>）：
-    ///   - 8192×4096 时整幅 Color32 是 128 MB，三张就是 384 MB —— 与生成峰值叠加
-    ///   - 同时还要再拷进 Texture2D、再编码成 PNG，等于同一份像素存在 3 份
+    /// 两条输出各走各的行序，互不迁就：
+    ///   - **贴图**：第 0 行必须是北极 —— 着色器里 <c>uv.y = 0</c> 在北极，而 uv.y=0 就是贴图第 0 行
+    ///   - **PNG 文件**：第一行必须是图像顶部（北极）—— 给人看、给别的软件读
     ///
-    /// 这里按**纬度条带**（默认 256 行）渲染：一条带的缓冲只有
-    /// <c>256 × 8192 × 4 B = 8 MB</c>，逐带 <c>SetPixels32</c> 进贴图，
-    /// 贴图编码后可选地 <c>Apply(false, true)</c> 释放 CPU 侧副本。
+    /// 旧实现走 <c>EncodeToPNG</c>，只能跟着贴图行序走，写出的文件必然南北颠倒。
+    /// 现在 PNG 由 <see cref="PngStreamWriter"/> 按渲染顺序直接写扫描线，
+    /// 「上北下南」与「着色器正确」可以同时成立，还省掉一张编码专用贴图。
+    ///
+    /// 内存：只保留一条带（默认 256 行，8192 档 8 MB）+ 压缩后的 IDAT。
     /// </summary>
     public static class MapExporter
     {
         /// <summary>每次渲染的行数。</summary>
         public const int StripRows = 256;
 
+        /// <summary>条带缓冲（复用，避免每条带重新分配）。</summary>
         private static Color32[] _strip;
+        private static byte[] _rowBytes;
 
-        /// <summary>取（必要时分配）条带缓冲。导出是串行的，复用一块即可。</summary>
         private static Color32[] GetStrip(int width, int rows)
         {
             int need = width * rows;
-            // 只增不减：连续多次导出时避免反复分配大数组
             if (_strip == null || _strip.Length < need)
                 _strip = new Color32[need];
             return _strip;
         }
 
-        /// <summary>
-        /// 把某一层渲染成一张可显示的贴图。
-        /// 渲染完不保留 CPU 侧像素（<c>Apply(false, true)</c>）：8192 档每张省 128 MB。
-        /// 需要编码 PNG 时请改用 <see cref="EncodePng"/>（它先编码再释放）。
-        /// </summary>
-        public static Texture2D RenderTexture(TerrainContext ctx, MapLayer layer)
+        private static byte[] GetRowBytes(int width)
         {
-            Texture2D tex = RenderTextureReadable(ctx, layer);
-            if (tex != null)
-                tex.Apply(false, true);
-            return tex;
+            int need = width * 4;
+            if (_rowBytes == null || _rowBytes.Length < need)
+                _rowBytes = new byte[need];
+            return _rowBytes;
         }
 
-        /// <summary>渲染成贴图但**保留** CPU 侧像素（可继续 EncodeToPNG）。</summary>
-        public static Texture2D RenderTextureReadable(TerrainContext ctx, MapLayer layer)
+        /// <summary>
+        /// 一次性产出**贴图 + PNG 文件**（生成流程用这个）：
+        /// 同一条带既写进贴图（第 0 行 = 北极），又写进 PNG（第一行 = 北极）。
+        /// </summary>
+        /// <param name="pngPath">为空时只建贴图，不写文件。</param>
+        public static Texture2D ExportLayer(TerrainContext ctx, MapLayer layer, string pngPath)
         {
             if (ctx == null)
                 return null;
 
-            int w = ctx.Width;
-            int h = ctx.Height;
+            int w = ctx.Width, h = ctx.Height;
             if (w <= 0 || h <= 0)
                 return null;
 
             bool linear = layer == MapLayer.Height;
-            Texture2D tex = new Texture2D(w, h, TextureFormat.RGBA32, false, linear);
+            var tex = new Texture2D(w, h, TextureFormat.RGBA32, false, linear);
 
+            float reliefScale = layer == MapLayer.Terrain
+                ? TerrainMapRenderer.ComputeReliefScale(w, h, ctx.HeightField)
+                : 1f;
+
+            bool writePng = !string.IsNullOrEmpty(pngPath);
+            PngStreamWriter writer = writePng ? new PngStreamWriter(w, h) : null;
+            byte[] rowBytes = writePng ? GetRowBytes(w) : null;
+
+            int rows = Math.Min(StripRows, h);
+            Color32[] strip = GetStrip(w, rows);
+
+            try
+            {
+                for (int y0 = 0; y0 < h; y0 += rows)
+                {
+                    int count = Math.Min(rows, h - y0);
+                    RenderRows(ctx, layer, reliefScale, y0, y0 + count, strip);
+
+                    // 贴图：图像行 y ↔ 贴图行 y（北极在第 0 行，给着色器用）
+                    tex.SetPixels32(0, y0, w, count, strip);
+
+                    // PNG：按渲染顺序自北向南逐行写
+                    if (writer != null)
+                        WriteStripRowsPng(writer, strip, w, count, rowBytes);
+                }
+
+                if (writer != null && writer.Finish(pngPath) < 0)
+                    Debug.LogError($"MapExporter: PNG 行数不匹配，未写文件 {pngPath}");
+            }
+            finally
+            {
+                writer?.Dispose();
+            }
+
+            tex.Apply(false, true);   // 释放 CPU 侧像素（8192 档每张 128 MB）
+            return tex;
+        }
+
+        /// <summary>只写 PNG、不建贴图（验证台 / 探针用）。</summary>
+        public static bool WritePng(TerrainContext ctx, MapLayer layer, string path)
+        {
+            if (ctx == null || string.IsNullOrEmpty(path))
+                return false;
+
+            int w = ctx.Width, h = ctx.Height;
             float reliefScale = layer == MapLayer.Terrain
                 ? TerrainMapRenderer.ComputeReliefScale(w, h, ctx.HeightField)
                 : 1f;
 
             int rows = Math.Min(StripRows, h);
             Color32[] strip = GetStrip(w, rows);
-
-            for (int y0 = 0; y0 < h; y0 += rows)
-            {
-                int count = Math.Min(rows, h - y0);
-                RenderRows(ctx, layer, reliefScale, y0, y0 + count, strip);
-
-                // 行映射：图像行 y ↔ 贴图行 y（两者都是「第 0 行 = 北极」）。
-                //
-                // 这不是可随意选的约定，而是被着色器钉死的：
-                //   EarthSurfaceLitShader 里 uv.y = 1 - (lat/π + 0.5)，北极(+90°) → uv.y = 0，
-                //   而 Unity 的 uv.y = 0 是贴图第 0 行 —— 所以北极必须在第 0 行。
-                // EncodeToPNG / 导入时 Unity 会各翻一次，写出的 PNG 虽是「南极朝上」，
-                // 但读回来（DecodeTexture）又翻正，往返一致。
-                //
-                // 曾经写成 h - y0 - count 并逐条带翻转，结果是每条带就地镜像 ——
-                // 表现为贴图/星球上每 256 行一道硬缝（2.5.0–2.7.0 的回归）。
-                tex.SetPixels32(0, y0, w, count, strip);
-            }
-
-            tex.Apply(false, false);
-            return tex;
-        }
-
-        /// <summary>把某一层渲染并按 PNG 写盘。返回是否成功。</summary>
-        public static bool WritePng(TerrainContext ctx, MapLayer layer, string path)
-        {
-            Texture2D tex = RenderTextureReadable(ctx, layer);
-            if (tex == null)
-                return false;
+            byte[] rowBytes = GetRowBytes(w);
+            var writer = new PngStreamWriter(w, h);
 
             try
             {
-                return WriteTexturePng(tex, path);
-            }
-            finally
-            {
-                UnityEngine.Object.Destroy(tex);
-            }
-        }
+                for (int y0 = 0; y0 < h; y0 += rows)
+                {
+                    int count = Math.Min(rows, h - y0);
+                    RenderRows(ctx, layer, reliefScale, y0, y0 + count, strip);
+                    WriteStripRowsPng(writer, strip, w, count, rowBytes);
+                }
 
-        /// <summary>把贴图编码成 PNG 写盘。调用后贴图的 CPU 像素被释放。</summary>
-        public static bool WriteTexturePng(Texture2D tex, string path)
-        {
-            if (tex == null || string.IsNullOrEmpty(path))
-                return false;
-
-            try
-            {
-                byte[] png = tex.EncodeToPNG();
-                File.WriteAllBytes(path, png);
-                return true;
+                return writer.Finish(path) > 0;
             }
             catch (Exception e)
             {
                 Debug.LogError($"MapExporter: 写 PNG 失败 {path}：{e.Message}");
                 return false;
+            }
+            finally
+            {
+                writer.Dispose();
+            }
+        }
+
+        /// <summary>把条带里的若干行按 RGBA 写进 PNG（行序保持不变）。</summary>
+        private static void WriteStripRowsPng(PngStreamWriter writer, Color32[] strip,
+            int width, int count, byte[] rowBytes)
+        {
+            for (int r = 0; r < count; r++)
+            {
+                int src = r * width;
+                for (int x = 0; x < width; x++)
+                {
+                    Color32 c = strip[src + x];
+                    int d = x * 4;
+                    rowBytes[d] = c.r;
+                    rowBytes[d + 1] = c.g;
+                    rowBytes[d + 2] = c.b;
+                    rowBytes[d + 3] = c.a;
+                }
+                writer.WriteRow(rowBytes);
             }
         }
 

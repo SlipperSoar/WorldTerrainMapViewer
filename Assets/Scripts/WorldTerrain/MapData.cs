@@ -41,6 +41,9 @@ namespace WorldTerrain
         /// <summary>是否逆向自转。查看器据此决定时间流转时太阳的转动方向。</summary>
         public bool rotationRetrograde;
 
+        /// <summary>该地图的 PNG 是否上北下南（2.8.0 起为 true；老地图为 false）。</summary>
+        public bool pngNorthUp;
+
         /// <summary>生成时间（ISO 8601 字符串，空表示未知）。</summary>
         public string generatedAt = "";
 

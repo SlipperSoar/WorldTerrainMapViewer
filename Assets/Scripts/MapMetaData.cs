@@ -39,6 +39,23 @@ public class MapMetaData
     /// </summary>
     public bool pngNorthUp;
 
+    // ── 整型配方（2.9.0 起）：重建地图的唯一依据，避免浮点文本往返误差 ──
+    //
+    // 老地图只有上面那些 float 字段；读到配方字段为默认值（version=0）时，
+    // 视为「没有配方」，仍按旧行为直接载入 PNG。
+
+    /// <summary>配方版本；0 表示这张地图没有配方（老地图）。</summary>
+    public int recipeVersion;
+
+    /// <summary>水面占比，千分比。</summary>
+    public int waterPermille;
+
+    /// <summary>地轴倾角，毫度。</summary>
+    public int tiltMilliDeg;
+
+    /// <summary>星球半径，米。</summary>
+    public int radiusMeters;
+
     /// <summary>地图宽度（像素）。</summary>
     public int mapWidth;
 

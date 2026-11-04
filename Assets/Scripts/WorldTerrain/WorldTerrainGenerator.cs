@@ -37,6 +37,9 @@ public class WorldTerrainGenerator : MonoBehaviour
     private volatile string generationError;
     private volatile TerrainContext generationContext;
 
+    /// <summary>本次生成使用的整型配方（写进 _meta.json，用于日后重建）。</summary>
+    private MapRecipe pendingRecipe;
+
     /// <summary>导出开关（是否写高度图 / 板块图 / 人文 JSON）。地形图始终写。</summary>
     public MapExportOptions ExportOptions { get; set; } = MapExportOptions.All;
     private volatile bool isGenerating;
@@ -115,8 +118,13 @@ public class WorldTerrainGenerator : MonoBehaviour
             planetRadiusKm = PlanetProfile.DefaultRadiusKm;
         planetRadiusKm = PlanetProfile.ClampRadiusKm(planetRadiusKm);
 
-        StartCoroutine(GenerateWorldCoroutine(
-            seed, snapped, waterCoverage, axialTilt, planetRadiusKm, rotationRetrograde));
+        // 浮点参数在这里**一次性量化**成整型配方；之后一切都从配方展开，
+        // 保证「同一配方重建」逐位一致（JSON 文本往返不再有精度歧义）。
+        MapRecipe recipe = MapRecipe.FromParameters(
+            seed, snapped, waterCoverage, axialTilt, planetRadiusKm, rotationRetrograde);
+        pendingRecipe = recipe;
+
+        StartCoroutine(GenerateWorldCoroutine(recipe));
     }
 
     /// <summary>当前默认生成宽度（像素）。</summary>
@@ -128,24 +136,10 @@ public class WorldTerrainGenerator : MonoBehaviour
 
     #region Private
 
-    private IEnumerator GenerateWorldCoroutine(int seed, int mapWidth, float waterCoverage,
-        float axialTilt, float planetRadiusKm, bool rotationRetrograde)
+    private IEnumerator GenerateWorldCoroutine(MapRecipe recipe)
     {
-        int mapHeight = MapResolution.HeightFor(mapWidth);
-        var config = new WorldGenConfig
-        {
-            seed = seed,
-            width = mapWidth,
-            height = mapHeight,
-            minPlates = 4,
-            maxPlates = 8,
-            maxElevation = 10000f,
-            minElevation = -10000f,
-            waterCoverage = waterCoverage,
-            axialTilt = axialTilt,
-            planetRadiusKm = planetRadiusKm,
-            rotationRetrograde = rotationRetrograde
-        };
+        int seed = recipe.seed;
+        var config = recipe.ToConfig();
 
         generationProgress = 0f;
         generationError = null;
@@ -222,6 +216,10 @@ public class WorldTerrainGenerator : MonoBehaviour
             rotationRetrograde = config.rotationRetrograde,
             // 新写出的 PNG 由 PngStreamWriter 按「上北下南」生成
             pngNorthUp = true,
+            recipeVersion = recipe.version,
+            waterPermille = recipe.waterPermille,
+            tiltMilliDeg = recipe.tiltMilliDeg,
+            radiusMeters = recipe.radiusMeters,
             mapWidth = ctx.Width,
             mapHeight = ctx.Height,
             generatedAt = DateTime.Now.ToString("o"),

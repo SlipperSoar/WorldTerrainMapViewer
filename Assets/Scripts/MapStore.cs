@@ -58,10 +58,34 @@ public static class MapStore
             return null;
 
         Paths paths = GetPaths(baseName);
+
+        // 2.9.0 起生成只写配方（meta），不写 PNG —— 没有地形图但有 meta 时返回「只有配方」的契约，
+        // 由查看器按配方重建。老地图（有 PNG）仍走原路径。
         if (!paths.HasTerrain)
         {
-            Debug.LogWarning($"MapStore: 找不到地形图 {paths.terrain}");
-            return null;
+            MapMetaData onlyMeta = MapMetaData.Load(baseName);
+            if (onlyMeta == null || !onlyMeta.HasRecipe)
+            {
+                Debug.LogWarning($"MapStore: 找不到地形图 {paths.terrain}");
+                return null;
+            }
+
+            return new MapData
+            {
+                baseName = baseName,
+                hasRecipe = true,
+                recipe = onlyMeta.ToRecipe(),
+                seed = onlyMeta.seed,
+                axialTilt = onlyMeta.axialTilt,
+                waterCoverage = onlyMeta.waterCoverage,
+                planetRadiusKm = onlyMeta.planetRadiusKm,
+                rotationRetrograde = onlyMeta.rotationRetrograde,
+                pngNorthUp = onlyMeta.pngNorthUp,
+                width = onlyMeta.mapWidth,
+                height = onlyMeta.mapHeight,
+                generatedAt = onlyMeta.generatedAt,
+                human = HumanGeographyData.Load(baseName)
+            };
         }
 
         var data = new MapData

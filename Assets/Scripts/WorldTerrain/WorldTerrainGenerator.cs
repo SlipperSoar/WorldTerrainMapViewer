@@ -40,6 +40,14 @@ public class WorldTerrainGenerator : MonoBehaviour
     /// <summary>本次生成使用的整型配方（写进 _meta.json，用于日后重建）。</summary>
     private MapRecipe pendingRecipe;
 
+    /// <summary>最近一次生成的上下文/配方/名字：用于「导出」与前后切换的缓存。</summary>
+    private TerrainContext lastContext;
+    private MapRecipe lastRecipe;
+    private string lastBaseName;
+
+    /// <summary>按配方重建时沿用原来的地图名（null = 新生成，用时间戳命名）。</summary>
+    private string pendingBaseName;
+
     /// <summary>导出开关（是否写高度图 / 板块图 / 人文 JSON）。地形图始终写。</summary>
     public MapExportOptions ExportOptions { get; set; } = MapExportOptions.All;
     private volatile bool isGenerating;
@@ -123,9 +131,86 @@ public class WorldTerrainGenerator : MonoBehaviour
         MapRecipe recipe = MapRecipe.FromParameters(
             seed, snapped, waterCoverage, axialTilt, planetRadiusKm, rotationRetrograde);
         pendingRecipe = recipe;
+        pendingBaseName = null;      // 新生成：用时间戳命名
 
         StartCoroutine(GenerateWorldCoroutine(recipe));
     }
+
+    /// <summary>
+    /// 命中缓存时直接复用上次的上下文：重新渲染显示贴图（约 1~3 秒），
+    /// 不必重跑整条生成管线（8192 档约 32 秒）。
+    /// </summary>
+    private void ApplyCachedToEarth(string baseName)
+    {
+        TerrainContext ctx = lastContext;
+        if (ctx == null || EarthManager.Instance == null)
+            return;
+
+        Texture2D terrainTex = ExportLayer(ctx, MapLayer.Terrain, null);
+        Texture2D heightTex = ExportOptions.height ? ExportLayer(ctx, MapLayer.Height, null) : null;
+        Texture2D overlayTex = ExportOptions.plates ? ExportLayer(ctx, MapLayer.Plates, null) : null;
+
+        EarthManager.Instance.SetEarthSurface(terrainTex);
+
+        if (heightTex != null) EarthManager.Instance.SetEarthHeightMap(heightTex);
+        else EarthManager.Instance.ClearEarthHeightMap();
+
+        if (overlayTex != null) EarthManager.Instance.SetPlateOverlay(overlayTex);
+        else EarthManager.Instance.SetPlateOverlayVisible(false);
+
+        EarthManager.Instance.SetHumanGeography(ctx.Human, baseName);
+
+        lastBaseName = baseName;
+        onComplete?.Invoke(MapStore.GetPaths(baseName).terrain);
+    }
+
+    /// <summary>
+    /// 按配方重建一张地图（首次选中「只有配方」的地图时调用）。
+    /// 沿用原地图名，因此重建后仍写回同一个 <c>_meta.json</c>。
+    /// </summary>
+    public bool GenerateFromRecipe(MapRecipe recipe, string baseName)
+    {
+        if (isGenerating)
+        {
+            Debug.LogWarning("WorldTerrainGenerator: 正在生成中，忽略重建请求");
+            return false;
+        }
+
+        // 缓存命中：同一份配方且上下文还在，直接复用，不必重算
+        if (lastContext != null && lastRecipe.SameAs(recipe))
+        {
+            ApplyCachedToEarth(baseName);
+            return true;
+        }
+
+        pendingRecipe = recipe;
+        pendingBaseName = baseName;
+        StartCoroutine(GenerateWorldCoroutine(recipe));
+        return true;
+    }
+
+    /// <summary>
+    /// 把**当前地图**导出成整包（地形/高度/板块 PNG + 人文 JSON + meta）。
+    /// 只有用户显式点「导出」时才调用 —— 生成本身不写这些大文件。
+    /// </summary>
+    public bool ExportCurrentMap(MapExportOptions? options = null)
+    {
+        if (lastContext == null || string.IsNullOrEmpty(lastBaseName))
+        {
+            Debug.LogWarning("ExportCurrentMap: 还没有可导出的地图（请先生成或加载）");
+            return false;
+        }
+
+        MapExportOptions opts = options ?? MapExportOptions.All;
+        bool ok = MapPublisher.ExportFull(lastContext, lastRecipe, lastBaseName, opts);
+        Debug.Log(ok
+            ? $"已导出地图 {lastBaseName}"
+            : $"导出失败 {lastBaseName}");
+        return ok;
+    }
+
+    /// <summary>最近一次生成/载入的地图名（用于 UI 显示与切换缓存）。</summary>
+    public string CurrentMapName => lastBaseName;
 
     /// <summary>当前默认生成宽度（像素）。</summary>
     public int DefaultWidth => MapResolution.Snap(defaultWidth);
@@ -186,15 +271,19 @@ public class WorldTerrainGenerator : MonoBehaviour
         // 再编码成 PNG，同一份像素会同时存在三份。现在一条带只有 8 MB。
         string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         string seedStr = seed > 0 ? seed.ToString() : "rnd";
-        string baseName = $"gen_{seedStr}_{timestamp}";
+        // 按配方重建时沿用原名，否则新生成用时间戳
+        string baseName = pendingBaseName ?? $"gen_{seedStr}_{timestamp}";
+        pendingBaseName = null;
         MapStore.Paths paths = MapStore.GetPaths(baseName);
 
-        Texture2D terrainTex = ExportLayer(ctx, MapLayer.Terrain, paths.terrain);
+        // 生成**不落 PNG**：只建显示用的贴图，配方写进 meta。
+        // 真正导出由用户点「导出」时触发（ExportCurrentMap），见 MapPublisher。
+        Texture2D terrainTex = ExportLayer(ctx, MapLayer.Terrain, null);
         Texture2D heightTex = ExportOptions.height
-            ? ExportLayer(ctx, MapLayer.Height, paths.height)
+            ? ExportLayer(ctx, MapLayer.Height, null)
             : null;
         Texture2D overlayTex = ExportOptions.plates
-            ? ExportLayer(ctx, MapLayer.Plates, paths.plates)
+            ? ExportLayer(ctx, MapLayer.Plates, null)
             : null;
 
         if (terrainTex == null)
@@ -206,28 +295,11 @@ public class WorldTerrainGenerator : MonoBehaviour
             yield break;
         }
 
-        // 元数据与人文
-        MapMetaData.Save(baseName, new MapMetaData
-        {
-            axialTilt = config.axialTilt,
-            waterCoverage = config.waterCoverage,
-            seed = seed,
-            planetRadiusKm = PlanetProfile.ClampRadiusKm(config.planetRadiusKm),
-            rotationRetrograde = config.rotationRetrograde,
-            // 新写出的 PNG 由 PngStreamWriter 按「上北下南」生成
-            pngNorthUp = true,
-            recipeVersion = recipe.version,
-            waterPermille = recipe.waterPermille,
-            tiltMilliDeg = recipe.tiltMilliDeg,
-            radiusMeters = recipe.radiusMeters,
-            mapWidth = ctx.Width,
-            mapHeight = ctx.Height,
-            generatedAt = DateTime.Now.ToString("o"),
-            human = HumanMapSummary.From(ctx.Human)
-        });
-
-        if (ExportOptions.human && ctx.Human != null)
-            HumanGeographyData.Save(baseName, ctx.Human);
+        // 只存配方（几百字节），不写 PNG / human
+        lastContext = ctx;
+        lastRecipe = recipe;
+        lastBaseName = baseName;
+        MapPublisher.SaveRecipe(ctx, recipe, baseName);
 
         // ── 应用到星球 ──
         if (EarthManager.Instance != null)

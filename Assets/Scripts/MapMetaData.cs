@@ -68,6 +68,30 @@ public class MapMetaData
     /// <summary>人文信息摘要（聚落/国家/交通线数量，完整数据在同名 _human.json 中）。</summary>
     public HumanMapSummary human = new HumanMapSummary();
 
+    /// <summary>这张地图有没有配方（老地图没有）。</summary>
+    public bool HasRecipe => recipeVersion > 0;
+
+    /// <summary>读出配方。老地图（无配方）时用 float 字段尽力折算。</summary>
+    public WorldTerrain.MapRecipe ToRecipe()
+    {
+        if (HasRecipe)
+        {
+            return new WorldTerrain.MapRecipe
+            {
+                version = recipeVersion,
+                seed = seed,
+                width = mapWidth,
+                waterPermille = waterPermille,
+                tiltMilliDeg = tiltMilliDeg,
+                radiusMeters = radiusMeters,
+                retrograde = rotationRetrograde
+            };
+        }
+
+        return WorldTerrain.MapRecipe.FromParameters(seed, mapWidth, waterCoverage,
+            axialTilt, planetRadiusKm, rotationRetrograde);
+    }
+
     public static float ClampAxialTilt(float tilt)
     {
         if (float.IsNaN(tilt)) return DefaultAxialTilt;

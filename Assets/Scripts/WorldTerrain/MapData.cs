@@ -44,6 +44,14 @@ namespace WorldTerrain
         /// <summary>该地图的 PNG 是否上北下南（2.8.0 起为 true；老地图为 false）。</summary>
         public bool pngNorthUp;
 
+        /// <summary>
+        /// 只有配方、没有 PNG（2.9.0 起的常态）。查看器需要按配方重建后才能显示。
+        /// </summary>
+        public bool hasRecipe;
+
+        /// <summary>该地图的整型配方（hasRecipe 为 true 时有效）。</summary>
+        public MapRecipe recipe;
+
         /// <summary>生成时间（ISO 8601 字符串，空表示未知）。</summary>
         public string generatedAt = "";
 

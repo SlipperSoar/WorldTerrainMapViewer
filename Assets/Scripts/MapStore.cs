@@ -119,64 +119,6 @@ public static class MapStore
         return data;
     }
 
-    /// <summary>
-    /// 把地图写盘。缺少地形图时直接拒绝（契约要求）。
-    /// </summary>
-    public static bool Save(MapData data)
-    {
-        if (data == null)
-        {
-            Debug.LogError("MapStore.Save 被拒绝：data 为 null");
-            return false;
-        }
-
-        if (!data.Validate(out string reason))
-        {
-            Debug.LogError($"MapStore.Save 被拒绝：{reason}");
-            return false;
-        }
-
-        Paths paths = GetPaths(data.baseName);
-
-        try
-        {
-            File.WriteAllBytes(paths.terrain, data.terrainPng);
-            Debug.Log($"Saved terrain map: {paths.terrain}");
-
-            if (data.HasHeight)
-                File.WriteAllBytes(paths.height, data.heightPng);
-
-            if (data.HasPlateOverlay)
-                File.WriteAllBytes(paths.plates, data.plateOverlayPng);
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"MapStore.Save 写图像失败：{e.Message}");
-            return false;
-        }
-
-        MapMetaData.Save(data.baseName, new MapMetaData
-        {
-            axialTilt = data.axialTilt,
-            waterCoverage = data.waterCoverage,
-            seed = data.seed,
-            planetRadiusKm = PlanetProfile.ClampRadiusKm(data.planetRadiusKm),
-            rotationRetrograde = data.rotationRetrograde,
-            pngNorthUp = data.pngNorthUp,
-            mapWidth = data.width,
-            mapHeight = data.height,
-            generatedAt = string.IsNullOrEmpty(data.generatedAt)
-                ? DateTime.Now.ToString("o")
-                : data.generatedAt,
-            human = HumanMapSummary.From(data.human)
-        });
-
-        if (data.human != null)
-            HumanGeographyData.Save(data.baseName, data.human);
-
-        return true;
-    }
-
     // ── 内部 ──
 
     private static byte[] ReadBytesOrNull(string path)

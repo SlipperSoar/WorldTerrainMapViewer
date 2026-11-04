@@ -1070,59 +1070,77 @@ public class UIController : MonoBehaviour
 
     #region LoadMap
 
+    /// <summary>
+    /// 扫描 StreamingAssets，产出地图列表条目。
+    ///
+    /// 条目有两种形态：
+    ///   - <c>名字.png</c>      → 按 PNG 载入（老地图、他人分享的整包）
+    ///   - <c>名字_meta.json</c> → 按配方重建（2.9.0 起的常态）
+    ///
+    /// 优先级规则（避免「导出过的地图永远不再用配方」）：
+    ///   1. meta 里有配方且 <b>版本与当前生成器一致</b> → 用配方（保证看到的是当前算法的结果）
+    ///   2. 否则有 PNG → 用 PNG（快照优先，例如旧版本导出的图）
+    ///   3. 只有老配方（版本不一致）且没有 PNG → 仍列出来，按配方尽量重建
+    /// </summary>
     private void LoadImagesFromStreamingAssets()
     {
         string streamingPath = Application.streamingAssetsPath;
         if (!Directory.Exists(streamingPath))
             Directory.CreateDirectory(streamingPath);
 
-        var availableImages = new List<string>();
-        string[] imageFiles = Directory.GetFiles(streamingPath, "*.*", SearchOption.TopDirectoryOnly);
-        foreach (string file in imageFiles)
+        // 收集：baseName → 有没有 PNG
+        var pngBases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var metaBases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        string[] files = Directory.GetFiles(streamingPath, "*.*", SearchOption.TopDirectoryOnly);
+        foreach (string file in files)
         {
-            string extension = Path.GetExtension(file).ToLower();
-            if (extension == ".png" || extension == ".jpg" || extension == ".jpeg" ||
-                extension == ".bmp" || extension == ".tga" || extension == ".tif" ||
-                extension == ".tiff")
+            string name = Path.GetFileName(file);
+
+            if (name.EndsWith("_meta.json", StringComparison.OrdinalIgnoreCase))
             {
-                string fileName = Path.GetFileName(file);
-                if (fileName.Contains("_height") || fileName.Contains("_plates") || fileName.Contains("_lines"))
-                    continue;
-                availableImages.Add(fileName);
+                metaBases.Add(name.Substring(0, name.Length - "_meta.json".Length));
+                continue;
             }
+
+            string extension = Path.GetExtension(file).ToLowerInvariant();
+            if (extension != ".png" && extension != ".jpg" && extension != ".jpeg" &&
+                extension != ".bmp" && extension != ".tga" && extension != ".tif" &&
+                extension != ".tiff")
+                continue;
+
+            // 配套文件不算地图本体
+            if (name.Contains("_height") || name.Contains("_plates") || name.Contains("_lines"))
+                continue;
+
+            pngBases.Add(Path.GetFileNameWithoutExtension(name));
         }
 
-        // 2.9.0 起生成只写配方（_meta.json），没有 PNG。
-        // 这里把「有配方、没 PNG」的地图也列出来；它们的名字以 _meta.json 结尾，
-        // 选中时按配方重建（见 OnImageItemSelected）。
-        foreach (string file in imageFiles)
+        var entries = new List<string>();
+
+        foreach (string baseName in pngBases)
         {
-            if (!file.EndsWith("_meta.json", StringComparison.OrdinalIgnoreCase))
-                continue;
+            bool useRecipe = false;
+            MapMetaData meta = MapMetaData.Load(baseName);
+            if (meta != null && meta.HasRecipe && meta.recipeVersion == MapRecipe.CurrentVersion)
+                useRecipe = true;
 
-            string metaName = Path.GetFileName(file);
-            string baseName = metaName.Substring(0, metaName.Length - "_meta.json".Length);
+            entries.Add(useRecipe ? baseName + "_meta.json" : baseName + ".png");
+        }
 
-            bool hasPng = false;
-            foreach (string img in availableImages)
-            {
-                if (string.Equals(Path.GetFileNameWithoutExtension(img), baseName,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    hasPng = true;
-                    break;
-                }
-            }
-            if (hasPng)
-                continue;
+        foreach (string baseName in metaBases)
+        {
+            if (pngBases.Contains(baseName))
+                continue;                       // 已在上面处理过
 
             MapMetaData meta = MapMetaData.Load(baseName);
             if (meta != null && meta.HasRecipe)
-                availableImages.Add(metaName);
+                entries.Add(baseName + "_meta.json");
         }
 
-        Debug.Log($"Found {availableImages.Count} maps in StreamingAssets");
-        UpdateImageListUI(availableImages);
+        entries.Sort(StringComparer.Ordinal);
+        Debug.Log($"Found {entries.Count} maps in StreamingAssets");
+        UpdateImageListUI(entries);
     }
 
     private void UpdateImageListUI(List<string> images)
@@ -1211,6 +1229,15 @@ public class UIController : MonoBehaviour
 
         string baseName = Path.GetFileNameWithoutExtension(filePath);
         MapData map = MapStore.Load(baseName);
+
+        // 配方地图不该走到这里（列表里它们以 _meta.json 结尾、直接走重建）。
+        // 万一走到了，转去重建，避免下面解码 null 的 PNG。
+        if (map != null && map.hasRecipe)
+        {
+            if (WorldTerrainGenerator.Instance != null)
+                WorldTerrainGenerator.Instance.GenerateFromRecipe(map.recipe, map.baseName);
+            yield break;
+        }
 
         if (map == null)
         {

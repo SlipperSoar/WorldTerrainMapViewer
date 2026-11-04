@@ -10,7 +10,14 @@ using WorldTerrain;
 /// </summary>
 public static class GenerationProbe
 {
-    private const int Width = 4096;
+    private static int Width
+    {
+        get
+        {
+            string v = Environment.GetEnvironmentVariable("WTMV_PROBE_WIDTH");
+            return int.TryParse(v, out int w) && w > 0 ? w : 4096;
+        }
+    }
 
     public static void Run()
     {

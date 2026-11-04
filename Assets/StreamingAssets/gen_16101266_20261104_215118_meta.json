@@ -1,0 +1,23 @@
+{
+    "version": 1,
+    "axialTilt": 26.899999618530275,
+    "waterCoverage": 0.7020000219345093,
+    "seed": 16101266,
+    "planetRadiusKm": 6371.0,
+    "rotationRetrograde": false,
+    "mapWidth": 2048,
+    "mapHeight": 1024,
+    "generatedAt": "2026-11-04T21:51:18.7910530+08:00",
+    "human": {
+        "generated": true,
+        "settlements": 78,
+        "villages": 51,
+        "towns": 19,
+        "cities": 4,
+        "capitals": 4,
+        "nations": 4,
+        "routes": 103,
+        "features": 24,
+        "totalPopulation": 95942500
+    }
+}

@@ -79,8 +79,17 @@ namespace WorldTerrain
                 int count = Math.Min(rows, h - y0);
                 RenderRows(ctx, layer, reliefScale, y0, y0 + count, strip);
 
-                // 一条带一次性写进贴图（y 从底部起算，与图像行方向相反）
-                tex.SetPixels32(0, h - y0 - count, w, count, strip);
+                // 行映射：图像行 y ↔ 贴图行 y（两者都是「第 0 行 = 北极」）。
+                //
+                // 这不是可随意选的约定，而是被着色器钉死的：
+                //   EarthSurfaceLitShader 里 uv.y = 1 - (lat/π + 0.5)，北极(+90°) → uv.y = 0，
+                //   而 Unity 的 uv.y = 0 是贴图第 0 行 —— 所以北极必须在第 0 行。
+                // EncodeToPNG / 导入时 Unity 会各翻一次，写出的 PNG 虽是「南极朝上」，
+                // 但读回来（DecodeTexture）又翻正，往返一致。
+                //
+                // 曾经写成 h - y0 - count 并逐条带翻转，结果是每条带就地镜像 ——
+                // 表现为贴图/星球上每 256 行一道硬缝（2.5.0–2.7.0 的回归）。
+                tex.SetPixels32(0, y0, w, count, strip);
             }
 
             tex.Apply(false, false);

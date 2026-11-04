@@ -26,14 +26,14 @@ namespace WorldTerrain
         /// </summary>
         /// <param name="axialTilt">地图属性：地轴倾角（度），决定冰盖范围与雪线高度</param>
         /// <param name="moistureField">预先算好的湿度场（风带 + 雨影），null 时按纬度/距海自行计算</param>
-        public static TerrainType[] Classify(
+        public static byte[] Classify(
             int width, int height, float[] heightField,
-            int[] plateIds, HydrologyData hydrology, SeededNoise noise,
+            ushort[] plateIds, HydrologyData hydrology, SeededNoise noise,
             float axialTilt = (float)PolarClimate.ReferenceTilt,
             float[] moistureField = null)
         {
             int w = width, h = height;
-            TerrainType[] types = new TerrainType[w * h];
+            byte[] types = new byte[w * h];
 
             // Step 5a: Compute distance-to-sea field (BFS from all ocean pixels)
             int[] seaDist = ClimateModel.SeaDistance(w, h, heightField);
@@ -77,7 +77,7 @@ namespace WorldTerrain
                     {
                         if (seaIceCoverage > 0.0 && IsIceAt(pos, seaIceCoverage, noise))
                         {
-                            types[idx] = TerrainType.SeaIce;
+                            types[idx] = (byte)TerrainType.SeaIce;
                             continue;
                         }
                     }
@@ -107,7 +107,7 @@ namespace WorldTerrain
 
                         if (iceCoverage > 0.0 && IsIceAt(pos, iceCoverage, noise))
                         {
-                            types[idx] = TerrainType.Glacier;
+                            types[idx] = (byte)TerrainType.Glacier;
                             continue;
                         }
                     }
@@ -115,19 +115,19 @@ namespace WorldTerrain
                     // ── 水体：湖泊 / 三角洲 / 河流（含季节性河流）──
                     if (hydrology.lakeMask[idx])
                     {
-                        types[idx] = TerrainType.Lake;
+                        types[idx] = (byte)TerrainType.Lake;
                         continue;
                     }
                     if (hydrology.deltaMask != null && hydrology.deltaMask[idx])
                     {
-                        types[idx] = TerrainType.Delta;
+                        types[idx] = (byte)TerrainType.Delta;
                         continue;
                     }
                     if (hydrology.riverMask[idx])
                     {
-                        types[idx] = hydrology.seasonalMask != null && hydrology.seasonalMask[idx]
+                        types[idx] = (byte)(hydrology.seasonalMask != null && hydrology.seasonalMask[idx]
                             ? TerrainType.SeasonalRiver
-                            : TerrainType.River;
+                            : TerrainType.River);
                         continue;
                     }
 
@@ -135,11 +135,11 @@ namespace WorldTerrain
                     if (elev <= 0f)
                     {
                         if (elev < -2000f)
-                            types[idx] = TerrainType.DeepOcean;
+                            types[idx] = (byte)TerrainType.DeepOcean;
                         else if (elev < -500f)
-                            types[idx] = TerrainType.Ocean;
+                            types[idx] = (byte)TerrainType.Ocean;
                         else
-                            types[idx] = TerrainType.ShallowOcean;
+                            types[idx] = (byte)TerrainType.ShallowOcean;
                         continue;
                     }
 
@@ -152,7 +152,7 @@ namespace WorldTerrain
                     double localTemp =
                         PolarClimate.TemperatureAtElevation(seaLevelTemp, elev);
 
-                    types[idx] = BiomeModel.Classify(
+                    types[idx] = (byte)BiomeModel.Classify(
                         localTemp, moisture, elev, slope[idx], seaDist[idx], absLat);
                 }
             }

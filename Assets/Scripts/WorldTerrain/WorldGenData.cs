@@ -177,8 +177,8 @@ namespace WorldTerrain
         public int width;
         public int height;
         public float[] heightField;
-        public int[] plateIds;
-        public TerrainType[] terrainTypes;
+        public ushort[] plateIds;
+        public byte[] terrainTypes;
 
         /// <summary>本次生成使用的地图属性：地轴倾角（度）。</summary>
         public float axialTilt;

@@ -1299,9 +1299,18 @@ dotnet build planetcheck.csproj -c Release
 | 项 | 状态 | 效果（4096 实测） |
 |---|---|---|
 | HydrologyData 布尔掩膜 → BitArray | ✅ 完成 | 5 B/格 → 0.625 B/格；生成峰值 728 → **693 MB** |
-| TerrainType[] → yte[] | 待做 | 4 → 1 B/格 |
-| plateIds int[] → ushort[] | 待做 | 4 → 2 B/格 |
-| 导出专用浮点量按需化 | 待评估 | 16 B/格 |
+| TerrainType[] → yte[] | ✅ 完成 | 4 → 1 B/格；4096 峰值 361 → **337 MB** |
+| plateIds int[] → ushort[] | ✅ 完成 | 4 → 2 B/格；4096 峰值 337 → **321 MB** |
+| 导出专用浮点量按需化 | 待做 | 16 B/格（
+iverWidth/discharge/waterDepth/catchmentMoisture） |
+
+**B 小计**：逐格 41 → **32 字节**；4096 峰值 396 → **321 MB**（−19%）；8192 峰值
+**1.37 GB → 1080 MB**（−21%）。距「8192 < 1 GB」还差约 80 MB —— 剩余空间在四个水文浮点数组
+（各 4 B/格）。把它们改成 ushort 定标或按需生成即可跨过 1 GB，但会牵动 HydrologyGenerator
+的多趟写入与人文/渲染的读取，留到下一轮单独做。
+
+**一致性**：B2/B3 后 11 个 dump 仍与基线逐位一致，群系分布（陆地 110549 格）与
+地形图颜色指纹（D0671A92…）均未变化。
 
 掩膜改位图后 **11 个 dump 仍与基线逐位一致**，掩膜指纹（7CEA4C52… / CFCBD46F…）与旧 ool[] 版本完全相同。
 

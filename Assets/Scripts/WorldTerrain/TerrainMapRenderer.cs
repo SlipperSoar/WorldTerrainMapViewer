@@ -76,7 +76,7 @@ namespace WorldTerrain
         /// </summary>
         public static Color32[] RenderTerrainMap(
             int width, int height, float[] heightField,
-            TerrainType[] terrainTypes, HydrologyData hydrology,
+            byte[] terrainTypes, HydrologyData hydrology,
             SeededNoise noise)
         {
             Color32[] colors = new Color32[width * height];
@@ -94,7 +94,7 @@ namespace WorldTerrain
         /// 这样 8192 档少一次 134 MB 的临时数组分配。
         /// </summary>
         public static void RenderTerrainRows(int width, int height, float[] heightField,
-            TerrainType[] terrainTypes, HydrologyData hydrology, SeededNoise noise,
+            byte[] terrainTypes, HydrologyData hydrology, SeededNoise noise,
             float reliefScale, int y0, int y1, Color32[] dest, int destOffset)
         {
             for (int y = y0; y < y1; y++)
@@ -115,7 +115,7 @@ namespace WorldTerrain
                                             reliefScale);
 
                     dest[dst + x] = Quantize(GetTerrainColor(
-                        heightField[row + x], terrainTypes[row + x],
+                        heightField[row + x], (TerrainType)terrainTypes[row + x],
                         hydrology.riverWidth[row + x],
                         hydrology.estuaryMask[row + x],
                         relief,
@@ -189,7 +189,7 @@ namespace WorldTerrain
         /// alpha so the underlying terrain is visible through the overlay.
         /// </summary>
         public static Color32[] RenderPlateMap(
-            int width, int height, int[] plateIds,
+            int width, int height, ushort[] plateIds,
             bool transparent)
         {
             Color32[] colors = new Color32[width * height];
@@ -201,7 +201,7 @@ namespace WorldTerrain
         /// 板块分界图的**按行带**渲染（流式导出用）。
         /// 调色板按板块总数一次生成（只有几十项），不随带宽增加内存。
         /// </summary>
-        public static void RenderPlateRows(int width, int height, int[] plateIds, bool transparent,
+        public static void RenderPlateRows(int width, int height, ushort[] plateIds, bool transparent,
             int y0, int y1, Color32[] dest, int destOffset)
         {
             int numPlates = 0;

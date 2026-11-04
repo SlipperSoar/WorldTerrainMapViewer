@@ -81,9 +81,9 @@ namespace WorldTerrain
         /// Voronoi plate assignment using dot product on 3D sphere positions.
         /// Noise perturbation on pixel positions creates irregular, zigzag boundaries.
         /// </summary>
-        public static int[] AssignPlates(int width, int height, PlateInfo[] plates, SeededNoise noise)
+        public static ushort[] AssignPlates(int width, int height, PlateInfo[] plates, SeededNoise noise)
         {
-            int[] plateIds = new int[width * height];
+            ushort[] plateIds = new ushort[width * height];
             double perturbStrength = 0.12;
 
             // 每行只写自己那一行的 plateIds，噪声是纯函数 → 并行逐位一致
@@ -117,7 +117,7 @@ namespace WorldTerrain
                         }
                     }
 
-                    plateIds[row + x] = best;
+                    plateIds[row + x] = (ushort)best;
                 }
             });
 
@@ -130,7 +130,7 @@ namespace WorldTerrain
         /// </summary>
         public static float[] GenerateHeights(
             WorldGenConfig config, Random rng,
-            int[] plateIds, PlateInfo[] plates, SeededNoise noise)
+            ushort[] plateIds, PlateInfo[] plates, SeededNoise noise)
         {
             int w = config.width, h = config.height;
             float[] heightField = new float[w * h];
@@ -388,7 +388,7 @@ namespace WorldTerrain
         /// then apply the cumulative effect to boundary pixels.
         /// </summary>
         private static float[] ComputeBoundaryEffects(
-            int w, int h, int[] plateIds, PlateInfo[] plates, Random rng, SeededNoise noise,
+            int w, int h, ushort[] plateIds, PlateInfo[] plates, Random rng, SeededNoise noise,
             float[] continental)
         {
             float[] effect = new float[w * h];

@@ -47,7 +47,7 @@ namespace WorldTerrain
         public PlateInfo[] Plates;
 
         /// <summary>[板块] 每像素所属板块编号。</summary>
-        public int[] PlateIds;
+        public ushort[] PlateIds;
 
         /// <summary>[地形] 高度场（米，海平面为 0）。后续步骤原地修改它。</summary>
         public float[] HeightField;
@@ -65,7 +65,7 @@ namespace WorldTerrain
         public HydrologyData Hydrology;
 
         /// <summary>[分类] 每像素的地形类型。</summary>
-        public TerrainType[] TerrainTypes;
+        public byte[] TerrainTypes;
 
         /// <summary>[人文] 聚落、国家、交通线与自然地名。</summary>
         public HumanGeographyData Human;

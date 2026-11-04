@@ -84,3 +84,6 @@ dsh_preview/
 
 # Release packaging output (zip is uploaded to GitHub Releases, not committed)
 /dist/
+
+# 生成的地图（测试产物，不进仓库；需要留档时用 git add -f）
+/Assets/StreamingAssets/gen_*

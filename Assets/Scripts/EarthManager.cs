@@ -1182,7 +1182,7 @@ public class EarthManager : MonoBehaviour
         SetHumanOverlayVisible(_humanOverlayVisible);
     }
 
-    private void ClearHumanGeography()
+    public void ClearHumanGeography()
     {
         for (int i = 0; i < _humanLabelObjects.Count; i++)
             if (_humanLabelObjects[i] != null)

@@ -700,7 +700,7 @@ public class UIController : MonoBehaviour
             return;
 
         // Create the toggle programmatically to avoid UXML rendering issues
-        _plateOverlayToggle = CreateCompactToggle("断层带", "plate-overlay-toggle", true);
+        _plateOverlayToggle = CreateCompactToggle("断层带", "plate-overlay-toggle", false);
 
         // Insert after the arrow toggle
         var parent = _arrowToggle.parent;
@@ -818,7 +818,7 @@ public class UIController : MonoBehaviour
         if (_terrainDisplacementToggle == null || _terrainDisplacementToggle.parent == null)
             return;
 
-        _humanOverlayToggle = CreateCompactToggle("人文", "human-overlay-toggle", true);
+        _humanOverlayToggle = CreateCompactToggle("人文", "human-overlay-toggle", false);
 
         var parent = _terrainDisplacementToggle.parent;
         int index = parent.IndexOf(_terrainDisplacementToggle);
@@ -1179,16 +1179,30 @@ public class UIController : MonoBehaviour
         // ── 板块分界叠加图（可选）──
         Texture2D plateTex = map.HasPlateOverlay ? DecodeTexture(map.plateOverlayPng, false, map.pngNorthUp) : null;
         if (plateTex != null)
+        {
             EarthManager.Instance.SetPlateOverlay(plateTex);
+            // 默认不显示断层带：载入后按开关状态同步，避免 SetPlateOverlay 把图层亮回来
+            EarthManager.Instance.SetPlateOverlayVisible(
+                _plateOverlayToggle != null && _plateOverlayToggle.value);
+        }
         else
+        {
             EarthManager.Instance.SetPlateOverlayVisible(false);
+        }
 
         // ── 地图属性（地轴倾角、水面占比）：都已在契约里 ──
         ApplyMapProperties(map);
 
         // ── 人文图层（可选）──
         if (Application.isPlaying && EarthManager.Instance != null)
-            EarthManager.Instance.SetHumanGeography(map.human, baseName);
+        {
+            // 默认不显示人文
+            bool showHuman = _humanOverlayToggle != null && _humanOverlayToggle.value;
+            if (showHuman)
+                EarthManager.Instance.SetHumanGeography(map.human, baseName);
+            else
+                EarthManager.Instance.ClearHumanGeography();
+        }
 
         Debug.Log($"已载入地图 {map}");
 

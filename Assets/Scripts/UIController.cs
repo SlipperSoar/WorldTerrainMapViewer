@@ -40,6 +40,7 @@ public class UIController : MonoBehaviour
     private Toggle _exportHeightToggle;
     private Toggle _exportPlatesToggle;
     private Toggle _exportHumanToggle;
+    private Button _exportButton;
     private Slider _resolutionSlider;
     private Label _resolutionValue;
     private Label _resolutionHint;
@@ -227,6 +228,7 @@ public class UIController : MonoBehaviour
         _exportHeightToggle = _root.Q<Toggle>("export-height");
         _exportPlatesToggle = _root.Q<Toggle>("export-plates");
         _exportHumanToggle = _root.Q<Toggle>("export-human");
+        _exportButton = _root.Q<Button>("export-button");
         _resolutionSlider = _root.Q<Slider>("resolution-slider");
         _resolutionValue = _root.Q<Label>("resolution-value");
         _resolutionHint = _root.Q<Label>("resolution-hint");
@@ -1090,7 +1092,36 @@ public class UIController : MonoBehaviour
             }
         }
 
-        Debug.Log($"Found {availableImages.Count} images in StreamingAssets");
+        // 2.9.0 起生成只写配方（_meta.json），没有 PNG。
+        // 这里把「有配方、没 PNG」的地图也列出来；它们的名字以 _meta.json 结尾，
+        // 选中时按配方重建（见 OnImageItemSelected）。
+        foreach (string file in imageFiles)
+        {
+            if (!file.EndsWith("_meta.json", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string metaName = Path.GetFileName(file);
+            string baseName = metaName.Substring(0, metaName.Length - "_meta.json".Length);
+
+            bool hasPng = false;
+            foreach (string img in availableImages)
+            {
+                if (string.Equals(Path.GetFileNameWithoutExtension(img), baseName,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    hasPng = true;
+                    break;
+                }
+            }
+            if (hasPng)
+                continue;
+
+            MapMetaData meta = MapMetaData.Load(baseName);
+            if (meta != null && meta.HasRecipe)
+                availableImages.Add(metaName);
+        }
+
+        Debug.Log($"Found {availableImages.Count} maps in StreamingAssets");
         UpdateImageListUI(availableImages);
     }
 
@@ -1103,7 +1134,9 @@ public class UIController : MonoBehaviour
         {
             var btn = new Button();
             btn.AddToClassList("map-item");
-            btn.text = Path.GetFileNameWithoutExtension(imageName);
+            btn.text = imageName.EndsWith("_meta.json", StringComparison.OrdinalIgnoreCase)
+                ? imageName.Substring(0, imageName.Length - "_meta.json".Length)
+                : Path.GetFileNameWithoutExtension(imageName);
             string capturedName = imageName;
             btn.clicked += () => OnImageItemSelected(capturedName);
             _mapList.Add(btn);
@@ -1120,8 +1153,38 @@ public class UIController : MonoBehaviour
 
     private void OnImageItemSelected(string imageName)
     {
+        Debug.Log($"Selected map: {imageName}");
+
+        // 「只有配方」的地图：按配方重建（生成是确定性的，结果与首次生成一致）
+        if (imageName.EndsWith("_meta.json", StringComparison.OrdinalIgnoreCase))
+        {
+            string recipeBaseName = imageName.Substring(0, imageName.Length - "_meta.json".Length);
+            _mapFileName.text = recipeBaseName;
+
+            MapMetaData meta = MapMetaData.Load(recipeBaseName);
+            if (meta == null || !meta.HasRecipe)
+            {
+                Debug.LogError($"Recipe missing for {recipeBaseName}");
+                return;
+            }
+
+            if (WorldTerrainGenerator.Instance == null)
+            {
+                Debug.LogError("WorldTerrainGenerator.Instance is null");
+                return;
+            }
+
+            if (_genProgress != null)
+                _genProgress.text = "按配方重建...";
+
+            WorldTerrainGenerator.Instance.onProgress = OnGenerationProgress;
+            WorldTerrainGenerator.Instance.onComplete = OnGenerationComplete;
+            WorldTerrainGenerator.Instance.onError = OnGenerationError;
+            WorldTerrainGenerator.Instance.GenerateFromRecipe(meta.ToRecipe(), recipeBaseName);
+            return;
+        }
+
         string fullPath = Path.Combine(Application.streamingAssetsPath, imageName);
-        Debug.Log($"Selected image: {imageName}");
         _mapFileName.text = Path.GetFileNameWithoutExtension(imageName);
         StartCoroutine(LoadTextureCoroutine(fullPath));
     }
@@ -1407,6 +1470,11 @@ public class UIController : MonoBehaviour
             _generateButton.clicked += OnGenerateButtonClicked;
         }
 
+        if (_exportButton != null)
+        {
+            _exportButton.clicked += OnExportButtonClicked;
+        }
+
         // 生成分辨率：滑条走 4 个离散档位（1024 / 2048 / 4096 / 8192 宽度）
         if (_resolutionSlider != null)
         {
@@ -1503,6 +1571,26 @@ public class UIController : MonoBehaviour
     private int SelectedGenerationWidth => _resolutionSlider != null
         ? MapResolution.WidthAt(Mathf.RoundToInt(_resolutionSlider.value))
         : MapResolution.DefaultWidth;
+
+    /// <summary>
+    /// 导出当前地图：一次性写出地形图 / 高度图 / 板块图 / 人文 JSON / meta。
+    /// 生成本身不写这些大文件，只有点这里才落盘。
+    /// </summary>
+    private void OnExportButtonClicked()
+    {
+        if (WorldTerrainGenerator.Instance == null)
+        {
+            Debug.LogError("WorldTerrainGenerator.Instance is null");
+            return;
+        }
+
+        bool ok = WorldTerrainGenerator.Instance.ExportCurrentMap();
+        if (_genProgress != null)
+        {
+            string name = WorldTerrainGenerator.Instance.CurrentMapName;
+            _genProgress.text = ok ? "已导出 " + name : "导出失败";
+        }
+    }
 
     private void OnGenerateButtonClicked()
     {

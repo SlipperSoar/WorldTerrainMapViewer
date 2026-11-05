@@ -1251,6 +1251,11 @@ public class UIController : MonoBehaviour
             yield break;
         }
 
+        // 载入的是磁盘上已有的 PNG 快照，不是本次生成的产物：
+        // 同步生成器的「当前地图」，避免「导出」写出上一次生成的那张图。
+        if (WorldTerrainGenerator.Instance != null)
+            WorldTerrainGenerator.Instance.NotifyExternalMapSelected(baseName);
+
         // ── 彩色地形图（必需）──
         Texture2D terrainTex = DecodeTexture(map.terrainPng, false, map.pngNorthUp);
         if (terrainTex == null)
@@ -1619,7 +1624,11 @@ public class UIController : MonoBehaviour
         if (_genProgress != null)
         {
             string name = WorldTerrainGenerator.Instance.CurrentMapName;
-            _genProgress.text = ok ? "已导出 " + name : "导出失败";
+            _genProgress.text = ok
+                ? "已导出 " + name
+                : string.IsNullOrEmpty(name)
+                    ? "请先生成或重建一张地图再导出"
+                    : "导出失败：" + name + "（磁盘快照无需再导出）";
         }
     }
 

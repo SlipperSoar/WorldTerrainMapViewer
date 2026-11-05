@@ -381,7 +381,7 @@ GenerationPipeline.CreateDefault()         ← 有序步骤表
 `earthRenderer` / `sunLight` 留空时会自动从场景里找。顶栏的「云层」开关会自动出现在
 「地形凹凸」右边（开关初值取自云层**实际**显隐状态，不会出现「没勾选却显示」）。
 
-> **顶栏开关的坑（Tuanjie 2022.3 实测）**：UI Toolkit 的 `Toggle` 默认样式会把内部
+> **顶栏开关的坑（Unity 2022.3 实测）**：UI Toolkit 的 `Toggle` 默认样式会把内部
 > `unity-toggle__label` 的宽度**定死**（实测 150px，而文字只占 23px），
 > 同时把 `unity-toggle__input`（装着 24×24 勾选框的父级）宽度压成 **0** ——
 > 两者叠加就是「文字与勾选框之间一大片空白」甚至「勾选框被裁掉看不见」。
@@ -636,13 +636,13 @@ Unity 的托管堆把内存还给 GC 之后**不会再把页还给操作系统**
 构建入口在 `Assets/Editor/WindowsBuild.cs`，也可以直接命令行调用：
 
 ```
-Tuanjie.exe -batchmode -nographics -quit -projectPath <仓库> ^
+Unity.exe -batchmode -nographics -quit -projectPath <仓库> ^
     -executeMethod WindowsBuild.Build -buildTarget StandaloneWindows64 -logFile -
 ```
 
 #### 只在本地发布
 
-发布**不使用任何 CI / GitHub Runner**：构建需要团结引擎（Tuanjie 2022.3.62t11），
+发布**不使用任何 CI / GitHub Runner**：构建需要 Unity 2022.3.62f3c1，
 它装在本地这台机器上，托管 runner 里没有、也装不上（数 GB 且需要激活）。
 因此整个流程都由 `scripts/release.ps1` 在本地一次跑完：
 
@@ -654,7 +654,7 @@ Tuanjie.exe -batchmode -nographics -quit -projectPath <仓库> ^
 token 复用 Git Credential Manager 里已存的凭据，也可以用 `-Token` 或 `GITHUB_TOKEN` 覆盖。
 
 > 仓库里**不保留** `.github/workflows/release.yml`：之前那套「推标签触发 workflow」的方案
-> 依赖一台注册了团结引擎的 self-hosted runner，实际没有这样的机器，标签推上去只会让任务
+> 依赖一台装了对应 Unity 版本的 self-hosted runner，实际没有这样的机器，标签推上去只会让任务
 > 无限排队（而且一旦有 runner 接手，会将旧提交构建的产物覆盖到已发布的 Release 上）。
 > 删除后推标签不会再产生任何排队任务。
 

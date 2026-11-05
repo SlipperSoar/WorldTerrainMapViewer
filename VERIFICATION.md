@@ -1139,8 +1139,8 @@ dotnet build planetcheck.csproj -c Release
 
 ### 16.6 只在本地发布（不用 CI）
 
-发布**不使用 GitHub Runner**。原因不是偏好，而是硬约束：构建需要团结引擎
-（Tuanjie 2022.3.62t11），它只装在本地；GitHub 托管的 runner 里没有，也装不上
+发布**不使用 GitHub Runner**。原因不是偏好，而是硬约束：构建需要 Unity 2022.3.62f3c1，
+它只装在本地；GitHub 托管的 runner 里没有，也装不上
 （安装包数 GB 且需要激活）。所以整个流程由 scripts/release.ps1 在本地跑完，
 只通过 GitHub **API** 创建 Release 与上传资产。
 

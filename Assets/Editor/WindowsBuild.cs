@@ -9,7 +9,7 @@ using UnityEngine;
 /// Windows 播放器构建入口，供命令行（-executeMethod）与发布脚本调用。
 ///
 /// 用法：
-///   Tuanjie.exe -batchmode -nographics -quit -projectPath &lt;仓库&gt; \
+///   Unity.exe   -batchmode -nographics -quit -projectPath &lt;仓库&gt; \
 ///       -executeMethod WindowsBuild.Build -logFile -
 ///
 /// 输出目录可用环境变量 <c>WTMV_BUILD_DIR</c> 覆盖（默认为 Build，与历史产物位置一致）。

@@ -15,7 +15,7 @@
       1. Preflight (token, repo, editor)
       2. Bump ProjectSettings bundleVersion
       3. Compile check (WindowsBuild.CheckCompile) -- fail fast on script errors
-      4. Build StandaloneWindows64 via Tuanjie batchmode
+      4. Build StandaloneWindows64 via Unity batchmode
       5. Zip Build/ -> dist/WorldTerrainMapViewer.zip
       6. git add -A + commit
       7. git tag V<Version>
@@ -135,7 +135,7 @@ if (Test-Path $projSettings) {
 if (-not $SkipBuild) {
     Step "Build Windows player"
     if (-not $EditorPath) {
-        $EditorPath = "C:\Program Files\Tuanjie\Hub\Editor\2022.3.62t11\Editor\Tuanjie.exe"
+        $EditorPath = "C:\Program Files\Unity\Hub\Editor\2022.3.62f3c1\Editor\Unity.exe"
     }
     if (-not (Test-Path $EditorPath)) { Fail "editor not found: $EditorPath" }
     Info "editor: $EditorPath"

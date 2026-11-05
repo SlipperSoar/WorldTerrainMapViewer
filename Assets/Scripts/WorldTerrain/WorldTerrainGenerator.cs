@@ -104,25 +104,17 @@ public class WorldTerrainGenerator : MonoBehaviour
         if (width <= 0)
             width = defaultWidth;
 
-        // 只允许离散档位：任意值都吸附到最近的 1024/2048/4096/8192
-        int snapped = MapResolution.Snap(width);
-        if (snapped != width)
-            Debug.Log($"生成宽度 {width} 不在可选档位内，已吸附到 {snapped}");
-
         // 内存不足时不允许生成过高的分辨率（UI 已把滑条卡住，这里是第二道防线，
         // 也拦住脚本/其它调用方绕过界面直接调用的情形）
-        int systemMemoryMb = SystemInfo.systemMemorySize;
-        if (!MapResolution.IsAllowed(snapped, systemMemoryMb))
+        if (!GuardMemory(width, out int snapped, out string reason))
         {
-            string reason =
-                $"内存不足，已拒绝生成 {MapResolution.Label(snapped)}：" +
-                $"需要 {MapResolution.RequiredLabel(snapped)}，本机物理内存 {systemMemoryMb} MB，" +
-                $"最高允许 {MapResolution.Label(MapResolution.MaxAllowedWidth(systemMemoryMb))}";
-
             Debug.LogError(reason);
             onError?.Invoke(reason);
             return;
         }
+
+        if (snapped != width)
+            Debug.Log($"生成宽度 {width} 不在可选档位内，已吸附到 {snapped}");
 
         if (waterCoverage < 0f)
             waterCoverage = this.waterCoverage;
@@ -143,6 +135,27 @@ public class WorldTerrainGenerator : MonoBehaviour
         pendingBaseName = null;      // 新生成：用时间戳命名
 
         StartCoroutine(GenerateWorldCoroutine(recipe));
+    }
+
+    /// <summary>
+    /// 把宽度吸附到可选档位，并按物理内存判断该档位是否允许生成。
+    /// GenerateWorld 与 GenerateFromRecipe 都必须过这里，避免两条入口出现不同的护栏。
+    /// </summary>
+    private static bool GuardMemory(int width, out int snapped, out string error)
+    {
+        snapped = MapResolution.Snap(width);
+        int systemMemoryMb = SystemInfo.systemMemorySize;
+
+        if (MapResolution.IsAllowed(snapped, systemMemoryMb))
+        {
+            error = null;
+            return true;
+        }
+
+        error = $"内存不足，已拒绝生成 {MapResolution.Label(snapped)}：" +
+                $"需要 {MapResolution.RequiredLabel(snapped)}，本机物理内存 {systemMemoryMb} MB，" +
+                $"最高允许 {MapResolution.Label(MapResolution.MaxAllowedWidth(systemMemoryMb))}";
+        return false;
     }
 
     /// <summary>
@@ -172,7 +185,9 @@ public class WorldTerrainGenerator : MonoBehaviour
         EarthManager.Instance.SetHumanOverlayVisible(ShowHumanOverlay);
 
         lastBaseName = baseName;
-        onComplete?.Invoke(MapStore.GetPaths(baseName).terrain);
+        onProgress?.Invoke(1f);
+        // 与整条生成管线一致：传地图名，不传尚不存在的 PNG 路径。
+        onComplete?.Invoke(baseName);
     }
 
     /// <summary>
@@ -184,6 +199,15 @@ public class WorldTerrainGenerator : MonoBehaviour
         if (isGenerating)
         {
             Debug.LogWarning("WorldTerrainGenerator: 正在生成中，忽略重建请求");
+            return false;
+        }
+
+        // 按配方重建与「生成新地图」走同一道内存防线：列表里点选一张 8192 档
+        // 配方图，同样要先确认这台机器放得下，不能绕过 UI 直接跑全管线。
+        if (!GuardMemory(recipe.width, out _, out string reason))
+        {
+            Debug.LogError(reason);
+            onError?.Invoke(reason);
             return false;
         }
 
@@ -208,7 +232,7 @@ public class WorldTerrainGenerator : MonoBehaviour
     {
         if (lastContext == null || string.IsNullOrEmpty(lastBaseName))
         {
-            Debug.LogWarning("ExportCurrentMap: 还没有可导出的地图（请先生成或加载）");
+            Debug.LogWarning("ExportCurrentMap: 当前地图没有可导出的生成结果（请先生成或按配方重建）");
             return false;
         }
 
@@ -218,6 +242,37 @@ public class WorldTerrainGenerator : MonoBehaviour
             ? $"已导出地图 {lastBaseName}"
             : $"导出失败 {lastBaseName}");
         return ok;
+    }
+
+    /// <summary>
+    /// 查看器载入了一张**已有的 PNG 快照**时调用：让「当前地图」与导出状态保持一致。
+    /// 这类地图的 PNG 本来就在磁盘上，没有生成上下文可导出，因此清掉 lastContext，
+    /// 使 ExportCurrentMap 明确拒绝（而不是悄悄导出上一次生成的那张图）。
+    /// </summary>
+    public void NotifyExternalMapSelected(string baseName)
+    {
+        if (isGenerating)
+            return;
+
+        lastContext = null;
+        lastBaseName = baseName;
+        lastRecipe = default;
+    }
+
+    /// <summary>
+    /// 主动释放常驻的生成上下文（8192 档的逐格数组有数百 MB）。
+    /// 释放后缓存命中失效，再选中同一配方会重新跑管线 —— 结果不变，只是慢一些。
+    /// 保留 lastBaseName / lastRecipe，导出与界面显示仍以当前地图为准。
+    /// </summary>
+    public void ReleaseCachedContext()
+    {
+        lastContext = null;
+        generationContext = null;
+    }
+
+    private void OnDestroy()
+    {
+        ReleaseCachedContext();
     }
 
     /// <summary>最近一次生成/载入的地图名（用于 UI 显示与切换缓存）。</summary>
@@ -285,10 +340,11 @@ public class WorldTerrainGenerator : MonoBehaviour
         // 按配方重建时沿用原名，否则新生成用时间戳
         string baseName = pendingBaseName ?? $"gen_{seedStr}_{timestamp}";
         pendingBaseName = null;
-        MapStore.Paths paths = MapStore.GetPaths(baseName);
 
         // 生成**不落 PNG**：只建显示用的贴图，配方写进 meta。
         // 真正导出由用户点「导出」时触发（ExportCurrentMap），见 MapPublisher。
+        // 注意：这里保留 lastContext 是为了「随时可导出」与配方缓存命中，
+        // 代价是逐格大数组常驻到下次生成/手动释放为止（见 ReleaseCachedContext）。
         Texture2D terrainTex = ExportLayer(ctx, MapLayer.Terrain, null);
         Texture2D heightTex = ExportOptions.height
             ? ExportLayer(ctx, MapLayer.Height, null)
@@ -306,11 +362,17 @@ public class WorldTerrainGenerator : MonoBehaviour
             yield break;
         }
 
-        // 只存配方（几百字节），不写 PNG / human
+        // 只存配方（几百字节），不写 PNG / human。写失败要如实报错：
+        // 否则地图列表里不会出现这张图，界面却已经显示「生成完成」。
         lastContext = ctx;
         lastRecipe = recipe;
         lastBaseName = baseName;
-        MapPublisher.SaveRecipe(ctx, recipe, baseName);
+        if (!MapPublisher.SaveRecipe(ctx, recipe, baseName))
+        {
+            string error = $"写入地图配方失败（{baseName}），该地图无法在列表中重建";
+            Debug.LogError(error);
+            onError?.Invoke(error);
+        }
 
         // ── 应用到星球 ──
         if (EarthManager.Instance != null)
@@ -339,13 +401,14 @@ public class WorldTerrainGenerator : MonoBehaviour
         }
 
         onProgress?.Invoke(1f);
-        onComplete?.Invoke(MapStore.GetPaths(baseName).terrain);
+        // 回调给的是地图名而非 PNG 路径：生成只写 meta，PNG 要等用户点「导出」才有。
+        onComplete?.Invoke(baseName);
 
-        // ── 释放后台线程交出来的中间结果 ──
+        // ── 释放后台线程交出来的中间结果引用 ──
         //
-        // generationResult 里的数组很大：8192×4096 时 heightField / plateIds / terrainTypes
-        // 各 128 MB，三张 Color32 各 128 MB，合计约 770 MB。彩色数据已经拷进贴图、
-        // 也编码进 PNG 字节写盘了，这里必须清掉引用，否则整份结果会一直挂在这个字段上。
+        // 注意：lastContext 仍持有整份上下文（为了随时可导出 / 缓存命中），
+        // 这里清掉的只是 generationContext 这个「线程→主线程」的交接引用。
+        // 真正释放大数组要调用 ReleaseCachedContext() 或等下一次生成覆盖。
         ReleaseGenerationResult();
 
         // ── 让 Unity 回收「已销毁但尚未真正释放」的原生资源 ──

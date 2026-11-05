@@ -73,7 +73,6 @@ GraphicsSettings:
   m_CameraRelativeShadowCulling: 0
   m_GenerateGeometryBuffer: 0
   m_EnableGDRP: 0
-  m_EnableTuanjieGI: 0
   m_VariableRateShadingMode: 0
   m_RelativeRateShadingLevel: 1
   m_MaxDistanceRatio: 500

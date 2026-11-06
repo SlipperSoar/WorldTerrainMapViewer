@@ -10,7 +10,7 @@ namespace WorldTerrain
     /// 着色器直接采样（步骤 2 的法线 / 独立水面 pass，步骤 3 与 4 的雪线 / 潮汐）。
     ///
     ///   _surface.png  R = 高度（-10000..10000 m → 0..255）
-    ///                 G = 水体（255 = 水，0 = 陆；硬掩膜）
+    ///                 G = 水体分类（V3.2 起，间隔编码，见 WaterClass）
     ///                 B = 气温（最热月平均气温 -40..40℃ → 0..255，随海拔递减）
     ///                 A = 湿度（0..1 → 0..255）
     ///
@@ -69,33 +69,34 @@ namespace WorldTerrain
             return ComputeRenderParams(ctx.HeightField, ctx.Config.axialTilt);
         }
 
-        // ── 水体判定（供 surface 的 G 通道与后续独立水面 pass 共用）─────────
+        // ── 水体分类（供 surface 的 G 通道与后续独立水面 pass 共用）─────────
 
         /// <summary>
-        /// 该地形类型是否属于水体。与 <c>TerrainClassifier</c> 的判定保持一致：
-        /// 所有海洋/湖泊/河流/海冰/冰川（冰也由水面 pass 处理）都算「有水面」。
+        /// 地形类型 → 水体分类。与 <c>TerrainClassifier</c> 的类型一一对应；
+        /// <c>Land</c> 表示没有水面（所有陆地群系）。
         /// </summary>
-        public static bool IsWater(TerrainType type)
+        public static WaterClass ClassifyWater(TerrainType type)
         {
             switch (type)
             {
-                case TerrainType.DeepOcean:
-                case TerrainType.Ocean:
-                case TerrainType.ShallowOcean:
-                case TerrainType.Lake:
-                case TerrainType.River:
-                case TerrainType.SeasonalRiver:
-                case TerrainType.Delta:
-                case TerrainType.SeaIce:
-                case TerrainType.Glacier:
-                case TerrainType.SnowPeak:
-                    return true;
-                default:
-                    return false;
+                case TerrainType.DeepOcean:    return WaterClass.DeepOcean;
+                case TerrainType.Ocean:        return WaterClass.Ocean;
+                case TerrainType.ShallowOcean: return WaterClass.ShallowOcean;
+                case TerrainType.Lake:         return WaterClass.Lake;
+                case TerrainType.River:        return WaterClass.River;
+                case TerrainType.SeasonalRiver:return WaterClass.SeasonalRiver;
+                case TerrainType.Delta:        return WaterClass.Delta;
+                case TerrainType.SeaIce:       return WaterClass.SeaIce;
+                case TerrainType.Glacier:      return WaterClass.Glacier;
+                case TerrainType.SnowPeak:     return WaterClass.SnowPeak;
+                default:                       return WaterClass.Land;
             }
         }
 
-        // ── 地表图（R 高度 / G 水体 / B 气温 / A 湿度）─────────────────────
+        /// <summary>该地形类型是否有水面（含冰）。供 roughness 等处复用。</summary>
+        public static bool IsWater(TerrainType type) => ClassifyWater(type) != WaterClass.Land;
+
+        // ── 地表图（R 高度 / G 水体分类 / B 气温 / A 湿度）─────────────────
 
         /// <summary>
         /// 把 [y0, y1) 行渲染成 RGBA 地表数据，写进 <paramref name="dest"/>（从 <paramref name="destOffset"/> 起）。
@@ -127,9 +128,11 @@ namespace WorldTerrain
                     byte r = SurfaceContract.Encode(elev,
                         SurfaceContract.HeightMinMeters, SurfaceContract.HeightMaxMeters);
 
-                    // G：水体硬掩膜
-                    bool water = types != null && IsWater((TerrainType)types[i]);
-                    byte g = water ? SurfaceContract.WaterValue : SurfaceContract.LandValue;
+                    // G：水体分类（间隔编码）。types 为空时全部按 Land 处理。
+                    WaterClass waterCls = types != null
+                        ? ClassifyWater((TerrainType)types[i])
+                        : WaterClass.Land;
+                    byte g = SurfaceContract.EncodeWater(waterCls);
 
                     // B：该海拔的最热月平均气温（与 BiomeModel 用同一气温函数）
                     double localTemp = PolarClimate.TemperatureAtElevation(seaLevelTemp, elev);

@@ -181,6 +181,13 @@ public class WorldTerrainGenerator : MonoBehaviour
         else EarthManager.Instance.SetPlateOverlayVisible(false);
 
         EarthManager.Instance.SetHumanGeography(ctx.Human, baseName);
+
+        // 步骤 2.0：缓存命中也要把两张数据图挂回去，否则切回同一配方会丢 Fresnel
+        EarthManager.Instance.SetSurfaceData(
+            ExportDataLayer(ctx, MapLayer.Surface),
+            ExportDataLayer(ctx, MapLayer.Detail),
+            SurfaceDataLayers.ComputeRenderParams(ctx));
+
         EarthManager.Instance.SetPlateOverlayVisible(overlayTex != null && ShowPlateOverlay);
         EarthManager.Instance.SetHumanOverlayVisible(ShowHumanOverlay);
 
@@ -353,6 +360,12 @@ public class WorldTerrainGenerator : MonoBehaviour
             ? ExportLayer(ctx, MapLayer.Plates, null)
             : null;
 
+        // 步骤 2.0：生成后直接把两张数据图也建出来挂到地表材质，
+        // 让 Fresnel 的湿度调制立刻生效（不必先「导出 → 载入」）。
+        // 与导出整包走同一套流式渲染，不改变生成语义。
+        Texture2D surfaceTex = ExportDataLayer(ctx, MapLayer.Surface);
+        Texture2D detailTex = ExportDataLayer(ctx, MapLayer.Detail);
+
         if (terrainTex == null)
         {
             string error = $"导出地形图失败（{baseName}）";
@@ -390,6 +403,10 @@ public class WorldTerrainGenerator : MonoBehaviour
                 EarthManager.Instance.SetPlateOverlayVisible(false);
 
             EarthManager.Instance.SetHumanGeography(ctx.Human, baseName);
+
+            // 两张数据图 + 渲染参数：由当前上下文算出，与按配方重建结果一致
+            EarthManager.Instance.SetSurfaceData(surfaceTex, detailTex,
+                SurfaceDataLayers.ComputeRenderParams(ctx));
 
             // 与界面开关同步：叠加层刚被重建，必须按开关状态决定显示与否
             EarthManager.Instance.SetPlateOverlayVisible(overlayTex != null && ShowPlateOverlay);
@@ -446,6 +463,22 @@ public class WorldTerrainGenerator : MonoBehaviour
             return null;
 
         tex.filterMode = FilterMode.Bilinear;
+        tex.wrapMode = TextureWrapMode.Repeat;
+        return tex;
+    }
+
+    /// <summary>
+    /// 建一张**数据图贴图**（不写盘）供地表材质采样。
+    /// linear 由 MapExporter 保证；surface 的 G 是分类值，必须用 Point 过滤，
+    /// 否则 Bilinear 插值会在类别交界处产生中间值，把「河」判成「海」。
+    /// </summary>
+    private static Texture2D ExportDataLayer(TerrainContext ctx, MapLayer layer)
+    {
+        Texture2D tex = MapExporter.ExportLayer(ctx, layer, null);
+        if (tex == null)
+            return null;
+
+        tex.filterMode = layer == MapLayer.Surface ? FilterMode.Point : FilterMode.Bilinear;
         tex.wrapMode = TextureWrapMode.Repeat;
         return tex;
     }

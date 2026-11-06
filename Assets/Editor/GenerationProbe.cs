@@ -127,9 +127,63 @@ public static class GenerationProbe
                       $"雪线(赤道)={(meta != null ? meta.snowLineEquatorMeters : -1f):F0}m " +
                       $"潮汐振幅={(meta != null ? meta.tideAmplitudeMeters : -1f):F1}m 一致={paramsOk}");
 
+            // G 通道水体分类自检：从导出的 surface PNG 解码，确认全是合法分类值
+            // （间隔编码：(int)WaterClass*16），且至少出现陆地与一种非陆地类。
+            VerifyWaterClasses(ctx, paths.surface);
+
+            // 砍老地图自检：无配方 meta 必须被 MapMetaData.Load 拒绝
+            VerifyOldMetaRejected(name);
+
             // 清理，避免污染 StreamingAssets
             foreach (string f in allFiles)
                 if (File.Exists(f)) File.Delete(f);
+        }
+
+        /// <summary>验证 _surface.png 的 G 通道是合法的水体分类值（间隔编码）。</summary>
+        static void VerifyWaterClasses(TerrainContext ctx, string surfacePath)
+        {
+            var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false, true);
+            if (!tex.LoadImage(File.ReadAllBytes(surfacePath)))
+            {
+                UnityEngine.Object.DestroyImmediate(tex);
+                Debug.LogError("[probe] surface PNG 解码失败");
+                return;
+            }
+
+            Color32[] px = tex.GetPixels32();
+            int stride = SurfaceContract.WaterClassStride;
+            bool allValid = true, hasLand = false, hasWater = false;
+            foreach (Color32 c in px)
+            {
+                int g = c.g;
+                if (g % stride != 0 || g > (int)WaterClass.SnowPeak * stride)
+                {
+                    allValid = false;
+                    break;
+                }
+                if (g == 0) hasLand = true; else hasWater = true;
+            }
+            UnityEngine.Object.DestroyImmediate(tex);
+            Debug.Log($"[probe] G 通道水体分类：合法={allValid} 含陆地={hasLand} 含水/冰={hasWater} " +
+                      $"(stride={stride}, 类别数={(int)WaterClass.SnowPeak + 1})");
+        }
+
+        /// <summary>验证 V3.2 起无配方 / 旧版 meta 不再被当作地图载入。</summary>
+        static void VerifyOldMetaRejected(string baseName)
+        {
+            string metaPath = MapMetaData.GetPath(baseName);
+            string backup = File.Exists(metaPath) ? File.ReadAllText(metaPath) : null;
+            try
+            {
+                // 写一份「没有配方」的假 meta，Load 必须返回 null
+                File.WriteAllText(metaPath, "{\"version\":3,\"recipeVersion\":0,\"seed\":1}");
+                bool rejected = MapMetaData.Load(baseName) == null;
+                Debug.Log($"[probe] 无配方 meta 被拒绝={rejected}");
+            }
+            finally
+            {
+                if (backup != null) File.WriteAllText(metaPath, backup);
+            }
         }
 
         /// <summary>

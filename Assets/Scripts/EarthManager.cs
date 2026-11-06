@@ -26,6 +26,9 @@ public class EarthManager : MonoBehaviour
     /// <summary>云层预览（气候数据驱动）；可挂在本物体或子物体上。</summary>
     private CloudLayer _cloudLayer;
 
+    /// <summary>大气边缘辉光球壳（独立于地表、套在云层外）。</summary>
+    private AtmosphereGlow _atmosphereGlow;
+
     // ── 星球三层贴图的所有权 ──
     //
     // 这几个字段记录「当前挂在材质上的贴图是谁」。换图时必须把上一张 Destroy 掉：
@@ -34,6 +37,17 @@ public class EarthManager : MonoBehaviour
     private Texture2D _earthSurfaceTexture;
     private Texture2D _earthHeightTexture;
     private Texture2D _plateOverlayTexture;
+
+    // 步骤 2.0：两张数据图（地表数据 / 细节）也归 EarthManager 所有，
+    // 换图时一并销毁，避免每切一次地图漏掉两份 8192 档 RGBA32。
+    private Texture2D _surfaceDataTexture;
+    private Texture2D _detailTexture;
+
+    /// <summary>当前是否挂了有效的高度图。没有高度图时凹凸位移必须强制关闭。</summary>
+    private bool _hasHeightMap;
+
+    /// <summary>用户/UI 希望的凹凸开关状态（与实际是否生效分开记）。</summary>
+    private bool _displacementRequested;
 
     /// <summary>
     /// 把 <paramref name="slot"/> 换成 <paramref name="next"/>，并销毁原来那张（若不同且非空）。
@@ -95,6 +109,14 @@ public class EarthManager : MonoBehaviour
         }
 
         _cloudLayer = GetComponentInChildren<CloudLayer>();
+
+        // 大气辉光球壳：场景里没有挂组件就自动加一个（不改场景文件），
+        // 并把星球 Renderer 交给它，让它能算出正确的球壳半径。
+        _atmosphereGlow = GetComponentInChildren<AtmosphereGlow>();
+        if (_atmosphereGlow == null && earthRenderer != null)
+            _atmosphereGlow = earthRenderer.gameObject.AddComponent<AtmosphereGlow>();
+        if (_atmosphereGlow != null)
+            _atmosphereGlow.SetEarthRenderer(earthRenderer);
     }
 
     void Update()
@@ -103,6 +125,40 @@ public class EarthManager : MonoBehaviour
         HandleColorSelection();
         UpdateMarkerLabels();
         UpdateHumanLabels();
+    }
+
+    #endregion
+
+    #region 大气辉光（独立球壳）
+
+    /// <summary>大气辉光是否可见。</summary>
+    public bool IsAtmosphereGlowVisible => _atmosphereGlow != null && _atmosphereGlow.IsVisible;
+
+    /// <summary>显示/隐藏大气辉光（球壳由 AtmosphereGlow 自建）。</summary>
+    public void SetAtmosphereGlowVisible(bool visible)
+    {
+        if (_atmosphereGlow == null)
+        {
+            _atmosphereGlow = GetComponentInChildren<AtmosphereGlow>();
+            if (_atmosphereGlow == null && earthRenderer != null)
+                _atmosphereGlow = earthRenderer.gameObject.AddComponent<AtmosphereGlow>();
+        }
+        if (_atmosphereGlow == null)
+            return;
+        _atmosphereGlow.SetEarthRenderer(earthRenderer);
+        _atmosphereGlow.SetVisible(visible);
+    }
+
+    /// <summary>设置辉光颜色。</summary>
+    public void SetAtmosphereGlowColor(Color c)
+    {
+        if (_atmosphereGlow != null) _atmosphereGlow.SetColor(c);
+    }
+
+    /// <summary>设置辉光强度。</summary>
+    public void SetAtmosphereGlowStrength(float s)
+    {
+        if (_atmosphereGlow != null) _atmosphereGlow.SetStrength(s);
     }
 
     #endregion
@@ -219,10 +275,12 @@ public class EarthManager : MonoBehaviour
         float factor = PlanetProfile.ScaleForRadiusKm(PlanetRadiusKm);
         earth.localScale = Vector3.one * (_baseEarthScale * factor);
 
-        // 云层按星球世界半径自适应，星球缩放后必须让它重算 ——
-        // 否则云层会停在旧尺寸上（缩小星球时云层浮在远处，放大时被地表穿破）
+        // 云层 / 大气辉光球壳都按星球世界半径自适应，星球缩放后必须让它们重算 ——
+        // 否则会停在旧尺寸上（缩小星球时浮在远处，放大时被地表穿破）
         if (_cloudLayer != null)
             _cloudLayer.RefreshScale();
+        if (_atmosphereGlow != null)
+            _atmosphereGlow.RefreshScale();
 
         Debug.Log($"星球尺寸：{PlanetProfile.RadiusLabel(PlanetRadiusKm)}，" +
                   $"场景缩放 {earth.localScale.x:F3}");
@@ -259,9 +317,12 @@ public class EarthManager : MonoBehaviour
             Material material = earthRenderer.material;
             material.SetTexture("_HeightTex", heightMap);
             material.SetFloat("_HeightScale", heightScale);
+            _hasHeightMap = heightMap != null;
 
             ReplaceOwnedTexture(ref _earthHeightTexture, heightMap);
 
+            // 高度图刚挂上：按用户期望重新决定要不要开位移
+            ApplyDisplacementState();
             Debug.Log($"Successfully loaded height map: {heightMap}");
         }
         else
@@ -277,9 +338,81 @@ public class EarthManager : MonoBehaviour
             Material material = earthRenderer.material;
             material.SetTexture("_HeightTex", null);
             material.SetFloat("_HeightScale", 0f);
+            _hasHeightMap = false;
+
+            // 关键：高度图没了必须**立即关掉位移 keyword**。
+            // 否则 shader 顶点阶段会 tex2Dlod 一张 null 贴图（返回黑=高度 -1），
+            // 把整个球面按 -1*scale 位移、法线全乱 —— 表现为「显示混乱不堪」。
+            material.DisableKeyword("_TERRAIN_DISPLACEMENT_ON");
 
             ReplaceOwnedTexture(ref _earthHeightTexture, null);
         }
+    }
+
+    /// <summary>
+    /// 按「用户想开凹凸」+「当前确实有高度图」两个条件决定位移 keyword。
+    /// 导入的单张 PNG 没有高度图，即使凹凸开关是开的也不会产生异常位移。
+    /// </summary>
+    private void ApplyDisplacementState()
+    {
+        if (earthRenderer == null)
+            return;
+
+        Material material = earthRenderer.material;
+        bool on = _displacementRequested && _hasHeightMap;
+        if (on)
+            material.EnableKeyword("_TERRAIN_DISPLACEMENT_ON");
+        else
+            material.DisableKeyword("_TERRAIN_DISPLACEMENT_ON");
+    }
+
+    /// <summary>
+    /// 步骤 2.0：把两张数据图与渲染参数接到地表材质。
+    ///
+    /// - <paramref name="surface"/>（_SurfaceTex）：RGBA 地表数据，G 为水体分类；
+    /// - <paramref name="detail"/>（_DetailTex）：RGBA 细节（法线/AO/粗糙度）；
+    /// - 两张都为 null 时关闭数据图层开关（_SURFACE_DATA_ON），shader 退回纯彩色图 + Fresnel。
+    ///
+    /// 渲染参数（海平面 / 雪线 / 潮汐）一并写成材质 uniform，供步骤 2~4 的
+    /// 着色器换算；缺 meta 的导入 PNG 传缺省值即可。
+    /// </summary>
+    public void SetSurfaceData(Texture2D surface, Texture2D detail,
+        WorldTerrain.SurfaceRenderParams p)
+    {
+        if (earthRenderer == null)
+        {
+            Debug.LogError("Earth Renderer is not assigned!");
+            return;
+        }
+
+        Material material = earthRenderer.material;
+        bool hasData = surface != null && detail != null;
+
+        material.SetTexture("_SurfaceTex", surface);
+        material.SetTexture("_DetailTex", detail);
+
+        if (hasData)
+            material.EnableKeyword("_SURFACE_DATA_ON");
+        else
+            material.DisableKeyword("_SURFACE_DATA_ON");
+
+        // 渲染参数（无论有没有数据图都写，导入 PNG 用缺省值，值本身合法）
+        material.SetFloat("_SeaLevel", p.seaLevelMeters);
+        material.SetFloat("_SnowLineEquator", p.snowLineEquatorMeters);
+        material.SetFloat("_SnowLineMid", p.snowLineMidMeters);
+        material.SetFloat("_SnowLinePole", p.snowLinePoleMeters);
+        material.SetFloat("_TideAmplitude", p.tideAmplitudeMeters);
+        material.SetFloat("_TidePeriod", p.tidePeriodDays);
+
+        ReplaceOwnedTexture(ref _surfaceDataTexture, surface);
+        ReplaceOwnedTexture(ref _detailTexture, detail);
+
+        // 自检日志：数据图 / 凹凸状态一目了然（辉光已移到独立球壳，由
+        // AtmosphereGlow 自己的日志负责，这里不再检查地表材质上的 Fresnel 属性）。
+        Debug.Log($"[earth] SetSurfaceData: 数据图={hasData} " +
+                  $"keyword(_SURFACE_DATA_ON)={material.IsKeywordEnabled("_SURFACE_DATA_ON")} " +
+                  $"高度图={_hasHeightMap} 位移keyword={material.IsKeywordEnabled("_TERRAIN_DISPLACEMENT_ON")} " +
+                  $"大气辉光={(_atmosphereGlow != null ? _atmosphereGlow.IsVisible : false)}");
     }
 
     public void SetPlateOverlay(Texture2D plateTexture)
@@ -306,14 +439,8 @@ public class EarthManager : MonoBehaviour
 
     public void SetTerrainDisplacement(bool enabled)
     {
-        if (earthRenderer != null)
-        {
-            Material material = earthRenderer.material;
-            if (enabled)
-                material.EnableKeyword("_TERRAIN_DISPLACEMENT_ON");
-            else
-                material.DisableKeyword("_TERRAIN_DISPLACEMENT_ON");
-        }
+        _displacementRequested = enabled;
+        ApplyDisplacementState();   // 没有高度图时这里不会真的打开 keyword
     }
 
     public Vector3? RaycastToEarthPosition(Vector3 screenPosition)

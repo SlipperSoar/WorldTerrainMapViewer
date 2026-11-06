@@ -1505,6 +1505,188 @@ meta 六项渲染参数齐全）、按 `(u,v)` 逐点打印采样值。
 
 ---
 
+## 20. V3.2.0：G 通道分类 / 运行时接入 / Fresnel / 砍老地图
+
+### 20.1 G 通道从二值掩膜改为水体分类
+
+步骤 1 里 `_surface.png` 的 G 是 `0/255` 二值（只分水/陆）。步骤 2 的独立
+水面 pass 需要区分河 / 湖 / 浅海 / 深海 / 冰，因此 V3.2.0 把它改成**分类值**。
+
+`WorldGenData.cs` 新增 `WaterClass` 枚举（10 类 + Land），编码用**间隔编码**
+（`SurfaceContract.WaterClassStride = 16`）：
+
+| 通道值 | 类别 | 通道值 | 类别 |
+|---|---|---|---|
+| 0 | 陆地 | 96 | 三角洲 |
+| 16 | 深海 | 112 | 海冰 |
+| 32 | 海洋 | 128 | 冰川 |
+| 48 | 浅海 | 144 | 雪峰 |
+| 64 | 湖泊 | | |
+| 80 | 河流 | | |
+
+- 编码 `G = (int)WaterClass * 16`；解码 `WaterClass = round(G/16)`
+- 「有水/冰」判断：`G >= 8`（`SurfaceContract.WaterThreshold`）
+- 分开间隔而非直接存 0..10：归一化后每类占 `~0.063` 的平台，误用 Bilinear
+  或 sRGB 时也不会把「河」抹成「海」；shader 里判断有无水只需 `g > 0.5*stride/255`
+- 类别只能追加在末尾，不能插入中间（否则已导出图语义漂移）
+
+`SurfaceDataLayers.ClassifyWater(TerrainType)` 是唯一的「类型 → 分类」映射，
+与 `TerrainClassifier` 的类型一一对应。`IsWater(type)` 改为 `ClassifyWater != Land`，
+供 detail 图的 roughness 复用。
+
+> **兼容性**：V3.1.0 导出的 `_surface.png` 里 G 只有 0/255；V3.2 的解码
+> `round(255/16)=16 → 钳制到 SnowPeak(10)`，不会得到「海」。因为 V3.2 同时
+> 砍掉了老地图（见 20.3），这类文件不再被当作地图载入，不影响正式路径。
+
+### 20.2 步骤 2.0：运行时接入 + Fresnel 边缘辉光
+
+**运行时接入**（此前只落盘、未加载）：
+
+- `UIController.DecodeTexture(png, linear, point)`：数据图 `linear=true`
+  （避免 gamma 污染数值），`surface` 额外 `point=true`（分类值不能被 Bilinear 插值）
+- `MapData.RenderParams` 把 6 个渲染参数整理成 `SurfaceRenderParams`
+- `EarthManager.SetSurfaceData(surface, detail, params)`：挂 `_SurfaceTex` /
+  `_DetailTex` 两张采样器、写 6 个 uniform，两张都缺时关 `_SURFACE_DATA_ON`
+- `EarthSurfaceLitShader` 的 ForwardBase pass 加采样器/uniform（**辉光后来移到独立球壳**，
+  见 §20.6）；ForwardAdd 是 `Blend One One` 叠加，不加辉光
+- `EarthManager.SetSurfaceData` 末尾加自检日志（数据图 / keyword / 高度图 / 辉光状态）
+
+> **辉光实现的最终形态见 §20.6**：Fresnel 不在地表 shader 里算，而是独立的
+> `Custom/AtmosphereGlowShader` 球壳。下面 §20.4 里关于「调亮地表 Fresnel 参数」
+> 的记录是迭代过程，最终已被独立球壳方案取代。
+
+### 20.3 砍掉「只有 PNG、没有配方」的老地图
+
+V3.2.0 起**地图 = 一份整型配方**（`_meta.json`）。关卡在
+`MapMetaData.Load`：`IsValidMap` 要求 `version >= 3 && HasRecipe`，否则返回 null。
+
+连带删除：
+- `pngNorthUp` 字段（`MapMetaData` / `MapData` / `MapPublisher`）→ 所有 PNG
+  **强制上北下南**，`DecodeTexture` 里 `FlipVertical` 改为无条件（这是 Unity
+  `LoadImage` 行序约定的固定一步，不是兼容逻辑）
+- `ToRecipe()` 的「无配方按 float 折算」分支、`GetRenderParams()` 的
+  `version < 3` 兜底
+- `UIController.LoadImagesFromStreamingAssets` 不再扫 PNG，只列有效 meta
+- `MapData.Validate` 改为「有配方 或 有地形图」二选一
+
+**保留**：只有配方、无 PNG 的地图（2.9 起主流方式，按配方重建）。
+`ClampAxialTilt` 的 NaN 防御保留（纯数值健壮性，与兼容无关）。
+
+**独立 PNG 导入入口**（用户仍想查看单张图）：侧栏新增「导入 PNG 查看」按钮。
+- 编辑器：`EditorUtility.OpenFilePanel` 选任意路径
+- 播放器：读 `StreamingAssets/import.png`（无第三方文件选择依赖）
+- 构造最小 `MapData`（只有 `terrainPng`、`hasRecipe=false`、渲染参数缺省），
+  走 `ApplyMapToEarth(..., loadAnnotations:false)`，**不进地图列表、不要求 meta、
+  不载入标注、不参与导出**
+
+### 20.4 首轮实测反馈与修复
+
+用户实测发现三个问题，均已修复（诊断过程用了一次性 Editor 探针，已删除）：
+
+**① 完全没有辉光（直接生成 / 配方重建都没有）**
+
+`MaterialProbe` 实测 `EarthSurface.mat` 的 `_FresnelStrength=0.600`、
+`_FresnelColor=(0.35,0.6,1.0)`、`_FresnelPower=3.0` —— **参数正常**。
+原因是 Unity 对材质里未序列化的新 shader 属性，会用 **Properties 声明的默认值**
+填充（不是类型零值），所以「属性缺失填 0」的推断不成立，辉光代码确实在跑。
+
+真实原因是 `pow(1-NdotV, 3)` 的可见带**极窄**（只有球体最外缘 1~2 像素），
+叠加偏暗的蓝色与明亮地形背景，肉眼几乎看不出。
+
+修复（有意调得「第一眼就能看见」）：
+
+| 参数 | 旧 | 新 |
+|---|---|---|
+| `_FresnelPower` | 3.0 | **1.6**（辉光带更宽） |
+| `_FresnelStrength` | 0.6 | **1.4** |
+| `_FresnelColor` | (0.35,0.6,1.0) | **(0.45,0.72,1.0)** |
+
+已实测「改 shader Properties 默认值 → 已有材质自动跟随」（0.6→1.4 生效），
+因此不需要运行时补齐逻辑（曾基于错误推断加过 `EnsureFresnelDefaults`，已删除）。
+
+顺带修了一个确定的 keyword bug：`#pragma multi_compile _ _SURFACE_DATA_ON`
+声明的是 **global** keyword，而 C# 侧 `material.EnableKeyword` 设的是 **local**
+keyword —— 两者不匹配，数据图分支永远进不去。改为
+`#pragma multi_compile_local _ _SURFACE_DATA_ON`（ForwardBase / ForwardAdd 都改）。
+
+`EarthManager.SetSurfaceData` 末尾加一条自检日志，打印 Fresnel 强度/幂/颜色、
+`_SURFACE_DATA_ON` / `_TERRAIN_DISPLACEMENT_ON` keyword 状态、是否有高度图，
+便于实测时从日志一眼确认参数与开关到位。
+
+**② 导入 PNG 显示混乱不堪（凹凸位移）**
+
+根因：`_TERRAIN_DISPLACEMENT_ON` keyword 由「地形凹凸」开关控制（默认开），
+`Start()` 里就启用了。导入的单张 PNG 没有高度图，`ClearEarthHeightMap` 原本只把
+`_HeightTex` 设 null、`_HeightScale` 设 0，**没关 keyword** → shader 顶点阶段
+`tex2Dlod(_HeightTex=null)` 返回黑 → 高度恒为 `-1` → 整个球面按 `-1*scale` 位移、
+相邻位移全等导致法线退化 → 画面混乱。
+
+**③ 即使凹凸开关打开也不该异常**
+
+`EarthManager` 新增 `_hasHeightMap` 状态 + `ApplyDisplacementState()`：
+位移 keyword 只有在「用户想开凹凸 **且** 确实有高度图」时才启用。
+- `SetEarthHeightMap` → `_hasHeightMap=true`，重新判定
+- `ClearEarthHeightMap` → `_hasHeightMap=false` 且 `DisableKeyword`
+- `SetTerrainDisplacement(enabled)` 只记录用户意愿，由 `ApplyDisplacementState` 决定实际开关
+- `UIController.ApplyMapToEarth` 无高度图时额外把「地形凹凸」Toggle
+  `SetValueWithoutNotify(false)` 并 `SetTerrainDisplacement(false)`
+
+这样导入 PNG 后即使手动打开凹凸开关，因无高度图也不会产生异常位移。
+
+### 20.5 验证（V3.2.0）
+
+| 项 | 结果 |
+|---|---|
+| gate / icecheck 编译 | 0 错误 |
+| 11 个 dump SHA-256 | 与 §3.1 基线逐位一致（生成语义未变） |
+| Unity `CheckCompile` / shader 编译 | 见构建日志 |
+| `GenerationProbe` | 新增：G 通道分类值合法性、无配方 meta 被拒绝 |
+| 外部解码工具 | `check_surface_png.py` / `sample_surface.py` 按间隔编码更新 |
+| 视觉回归（辉光 / 导入入口） | **待用户实测** |
+
+### 20.6 辉光移到独立大气球壳（第二轮实测反馈）
+
+第二轮实测：辉光有了，但「完全贴着星球，开启凹凸后几乎不可见」，且「云层套在
+凹凸了的星球外，辉光至少应该套在云层外」。根因是 Fresnel 算在**地表 shader 的 frag**
+里：它贴着位移后的表面、被外层的云层球壳整个盖住。
+
+**最终方案：独立的 `Custom/AtmosphereGlowShader` 球壳**（新增
+`Assets/Shaders/AtmosphereGlowShader.shader` + `Assets/Scripts/AtmosphereGlow.cs`）：
+
+| 项 | 取值 | 理由 |
+|---|---|---|
+| 球壳半径 | 星球半径 × **1.16**（`shellThickness=0.16`） | 云层是 ×1.12，必须更大才能套在云层外 |
+| Queue | `Transparent+10` | 云层是 `Transparent`，大气最后画 |
+| Blend | `One One`（加色） | 辉光是发光，不遮挡下面的地表/云层 |
+| Cull | **`Back`**（只画正面） | 正面三角形在相机与星球之间，深度比地表小，能通过 `ZTest LEqual` |
+| ZWrite | `Off` | 不写深度 |
+| Fresnel | `pow(1 - saturate(dot(N,V)), power) * strength` | 正面法线朝外：中心无光、轮廓边缘最亮 |
+| 太阳方向 | `dot(N,L)` 做 `1 + sunBoost*sun` | 向阳侧略亮，模拟散射方向性 |
+
+**踩过的坑**：最初用 `Cull Front`（只画背面）+ `abs(dot(N,V))`，结果背面三角形
+位于星球**后方**，被地表深度剔除，`ZTest LEqual` 直接把辉光全部丢掉。改成
+`Cull Back` + 标准 `1-NdotV` 才正确。
+
+球壳管理（仿 `CloudLayer`）：
+- 由 `EarthManager.Awake` 自动 `AddComponent<AtmosphereGlow>()`（**不改场景文件**），
+  并 `SetEarthRenderer(earthRenderer)`
+- `Start()` 里 `GameObject.CreatePrimitive(Sphere)` 建壳、销毁 Collider（不挡射线打标记）
+- 缩放算法与 `CloudLayer.ApplyScale` 一致：用星球自身 `Mesh.bounds` 的世界半径
+  （不用含子物体的 `Renderer.bounds`），`localScale = 2*R*(1+t)/parentScale`
+- `SetPlanetRadiusKm` 同时调 `_atmosphereGlow.RefreshScale()`，星球缩放后球壳跟着重算
+- `EarthManager` 暴露 `SetAtmosphereGlowVisible / SetColor / SetStrength` 供以后接 UI
+- 默认 `startVisible=true`
+
+**地表 shader 相应清理**：删掉 `_FresnelColor/_FresnelPower/_FresnelStrength` 三个
+Properties、两个 pass 的 uniform/helper、ForwardBase frag 里的辉光计算与湿度调制。
+`_SurfaceTex/_DetailTex` 与 6 个渲染参数 uniform **保留**（步骤 2 后续的独立水面 pass /
+法线贴图要用），`_SURFACE_DATA_ON` keyword 也保留（改为 `multi_compile_local`）。
+
+这样辉光与地形凹凸、云层显隐彻底解耦：凹凸任意开、云层任意开关，辉光始终是
+最外一圈完整的光环。
+
+---
+
 ## 附：不当作基线的历史数值
 
 以下数值出现在早期记录里，因为算法改动而**不再有效**，列出仅供追溯：

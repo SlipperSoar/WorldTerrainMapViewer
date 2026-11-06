@@ -177,10 +177,46 @@ namespace WorldTerrain
     }
 
     /// <summary>
-    /// 行星渲染「数据契约」的编码常量（步骤 1）。
+    /// 水体分类（V3.2.0 起）。写进 <c>_surface.png</c> 的 **G 通道**。
+    ///
+    /// 步骤 1 里 G 是「0/255 二值硬掩膜」，只能分水/陆；步骤 2 的独立水面 pass
+    /// 需要区分河 / 湖 / 浅海 / 深海 / 冰，才能分别做深度着色、泡沫与河网。
+    /// 因此 V3.2.0 把 G 改成**分类值**。值本身不直接写进通道 —— 见
+    /// <see cref="SurfaceContract.WaterClassStride"/> 的间隔编码说明。
+    ///
+    /// 顺序即数值，新增类只能追加在末尾，不要插入中间（否则已导出图语义漂移）。
+    /// </summary>
+    public enum WaterClass : byte
+    {
+        /// <summary>陆地（无水）。</summary>
+        Land = 0,
+        /// <summary>深海。</summary>
+        DeepOcean = 1,
+        /// <summary>海洋。</summary>
+        Ocean = 2,
+        /// <summary>浅海 / 大陆架。</summary>
+        ShallowOcean = 3,
+        /// <summary>湖泊（淡水）。</summary>
+        Lake = 4,
+        /// <summary>常年河流。</summary>
+        River = 5,
+        /// <summary>季节性（间歇）河流。</summary>
+        SeasonalRiver = 6,
+        /// <summary>河口三角洲分流河道。</summary>
+        Delta = 7,
+        /// <summary>海冰（海面常年冻结）。</summary>
+        SeaIce = 8,
+        /// <summary>陆地冰川 / 极地冰盖。</summary>
+        Glacier = 9,
+        /// <summary>终年积雪的山峰。</summary>
+        SnowPeak = 10
+    }
+
+    /// <summary>
+    /// 行星渲染「数据契约」的编码常量（步骤 1 定稿，V3.2.0 修订 G 通道）。
     ///
     /// 两张新图都是 **RGBA8 数据贴图**（不是给人看的彩色图），供后续步骤的着色器采样：
-    ///   - <c>_surface.png</c>：R=高度、G=水体、B=气温、A=湿度
+    ///   - <c>_surface.png</c>：R=高度、G=水体分类、B=气温、A=湿度
     ///   - <c>_detail.png</c> ：R/G=切线空间法线 XY、B=AO、A=粗糙度
     ///
     /// 所有编码都只用整数与 <see cref="System.Math"/>，可在后台线程 / 离线校验台运行。
@@ -200,9 +236,42 @@ namespace WorldTerrain
         public const double MoistureMin = 0.0;
         public const double MoistureMax = 1.0;
 
-        /// <summary>水体通道：非黑即白（硬掩膜，供独立水面 pass 使用）。</summary>
-        public const byte WaterValue = 255;
-        public const byte LandValue = 0;
+        // ── G 通道：水体分类的间隔编码 ──────────────────────────────────
+        //
+        // 为什么不用 0/1/2/... 直接存：分类值太小（0..10 → 归一化后 0..0.04），
+        // 一旦有人误用 Bilinear 采样或线性到 sRGB 的转换，数值就会被抹平，
+        // 河可能被判成海。间隔编码把每类放到一个「平台」上，插值落在两类中点时
+        // 也只会 round 到相邻之一，鲁棒得多；且 shader 里判断「有水」只需 g > 半个间隔。
+        //
+        //   G_byte = (int)WaterClass * 16        （Land=0, DeepOcean=16, ... SnowPeak=160）
+        //   解码   = (WaterClass)round(G_byte / 16)
+        //   是否有水 = G_byte >= 8（首个非陆地类的半间隔）
+        //
+        // 上限：255/16 = 15 类，当前 10 类（不含 Land），留 5 类余量。
+
+        /// <summary>水体分类编码间隔。</summary>
+        public const int WaterClassStride = 16;
+
+        /// <summary>首个非陆地类编码值的一半：G 大于等于它就算「有水」。</summary>
+        public const byte WaterThreshold = WaterClassStride / 2;
+
+        /// <summary>把水体分类编码进 G 通道。</summary>
+        public static byte EncodeWater(WaterClass cls)
+        {
+            return (byte)((int)cls * WaterClassStride);
+        }
+
+        /// <summary>从 G 通道字节解出分类（四舍五入到最近的平台）。</summary>
+        public static WaterClass DecodeWater(byte g)
+        {
+            int cls = (int)System.Math.Round((double)g / WaterClassStride);
+            if (cls < 0) cls = 0;
+            if (cls > (int)WaterClass.SnowPeak) cls = (int)WaterClass.SnowPeak;
+            return (WaterClass)cls;
+        }
+
+        /// <summary>G 通道是否表示有水（含冰）。</summary>
+        public static bool IsWaterByte(byte g) => g >= WaterThreshold;
 
         /// <summary>法线 XY 编码到 0-255（解码时 <c>xy = c/255*2-1</c>，Z 在着色器里重建）。</summary>
         public const float NormalNeutral = 0.5f;

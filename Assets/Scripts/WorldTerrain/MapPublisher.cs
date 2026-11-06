@@ -99,7 +99,6 @@ namespace WorldTerrain
                 seed = recipe.seed,
                 planetRadiusKm = recipe.PlanetRadiusKm,
                 rotationRetrograde = recipe.retrograde,
-                pngNorthUp = true,
                 recipeVersion = recipe.version,
                 waterPermille = recipe.waterPermille,
                 tiltMilliDeg = recipe.tiltMilliDeg,

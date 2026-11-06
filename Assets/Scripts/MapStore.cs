@@ -67,14 +67,16 @@ public static class MapStore
 
         Paths paths = GetPaths(baseName);
 
-        // 2.9.0 起生成只写配方（meta），不写 PNG —— 没有地形图但有 meta 时返回「只有配方」的契约，
-        // 由查看器按配方重建。老地图（有 PNG）仍走原路径。
+        // 2.9.0 起生成只写配方（meta），不写 PNG —— 没有地形图但有**有效 meta**时
+        // 返回「只有配方」的契约，由查看器按配方重建。
+        // V3.2.0 起：MapMetaData.Load 已过滤掉无配方/旧版 meta，因此这里拿到的一定是
+        // 带整型配方的有效地图；没有有效 meta 又没有地形图的，一律拒绝（老地图）。
         if (!paths.HasTerrain)
         {
             MapMetaData onlyMeta = MapMetaData.Load(baseName);
-            if (onlyMeta == null || !onlyMeta.HasRecipe)
+            if (onlyMeta == null)
             {
-                Debug.LogWarning($"MapStore: 找不到地形图 {paths.terrain}");
+                Debug.LogWarning($"MapStore: 无有效配方、也找不到地形图 {paths.terrain}（V3.2 起不再载入无配方老地图）");
                 return null;
             }
 
@@ -88,7 +90,6 @@ public static class MapStore
                 waterCoverage = onlyMeta.waterCoverage,
                 planetRadiusKm = onlyMeta.planetRadiusKm,
                 rotationRetrograde = onlyMeta.rotationRetrograde,
-                pngNorthUp = onlyMeta.pngNorthUp,
                 width = onlyMeta.mapWidth,
                 height = onlyMeta.mapHeight,
                 generatedAt = onlyMeta.generatedAt,
@@ -116,7 +117,6 @@ public static class MapStore
             data.seed = meta.seed;
             data.planetRadiusKm = meta.planetRadiusKm;
             data.rotationRetrograde = meta.rotationRetrograde;
-            data.pngNorthUp = meta.pngNorthUp;
             data.generatedAt = meta.generatedAt;
             data.width = meta.mapWidth;
             data.height = meta.mapHeight;
@@ -134,7 +134,7 @@ public static class MapStore
 
     // ── 内部 ──
 
-    /// <summary>把 meta 里的渲染参数投到数据契约上（老地图由 GetRenderParams 兜底）。</summary>
+    /// <summary>把 meta 里的渲染参数投到数据契约上。</summary>
     private static void ApplyRenderParams(MapData data, MapMetaData meta)
     {
         WorldTerrain.SurfaceRenderParams p = meta.GetRenderParams();

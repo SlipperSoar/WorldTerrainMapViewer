@@ -46,6 +46,7 @@
                 </ui:VisualElement>
                 <ui:Button name="generate-button" text="生成新世界" />
                 <ui:Button name="export-button" text="导出当前地图" />
+                <ui:Button name="import-png-button" text="导入 PNG 查看" />
                 <ui:Label name="gen-progress-label" />
             </ui:VisualElement>
             <ui:VisualElement name="marker-list-section">

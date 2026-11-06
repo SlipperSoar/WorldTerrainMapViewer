@@ -17,10 +17,11 @@ public class MapMetaData
 
     /// <summary>
     /// 元数据格式版本。
-    /// 3.1（V3.1.0）起加入「渲染参数」字段（海平面 / 雪线 / 潮汐），
-    /// 版本升到 3 以便查看器区分「有渲染参数」与老地图；字段缺失时按缺省值处理。
+    /// 3 = V3.1.0 起加入「渲染参数」字段（海平面 / 雪线 / 潮汐）。
+    /// V3.2.0 起**只接受 version==3 且带整型配方**的 meta：
+    /// 无配方、v1/v2 老 meta 都不再作为地图载入（见 Load 的 Valid 校验）。
     /// </summary>
-    public int version = 1;
+    public int version = 3;
 
     /// <summary>地轴倾角（黄赤交角），单位：度，范围 0-90。</summary>
     public float axialTilt = DefaultAxialTilt;
@@ -37,18 +38,15 @@ public class MapMetaData
     /// <summary>是否逆向自转（时间流转时太阳反向绕行）。缺省 = 顺向。</summary>
     public bool rotationRetrograde;
 
-    /// <summary>
-    /// 该地图的 PNG 是否**上北下南**（2.8.0 起为 true）。
-    /// 老地图（缺省 false）是 Unity 的贴图行序，即南北颠倒；载入时需要区别对待。
-    /// </summary>
-    public bool pngNorthUp;
+    // ── PNG 行序 ───────────────────────────────────────────────────────
+    // V3.2.0 起所有 PNG **强制上北下南**（第一行 = 北极）。删掉了老地图用的
+    // pngNorthUp 布尔：翻转不再是「兼容选项」，而是 Unity LoadImage 行序约定的
+    // 固定一步（见 UIController.DecodeTexture 的无条件 FlipVertical）。
 
     // ── 整型配方（2.9.0 起）：重建地图的唯一依据，避免浮点文本往返误差 ──
-    //
-    // 老地图只有上面那些 float 字段；读到配方字段为默认值（version=0）时，
-    // 视为「没有配方」，仍按旧行为直接载入 PNG。
+    // V3.2.0 起配方是 meta 的**必需字段**，没有配方的 meta 视为无效。
 
-    /// <summary>配方版本；0 表示这张地图没有配方（老地图）。</summary>
+    /// <summary>配方版本；0 表示这张地图没有配方（无效地图）。</summary>
     public int recipeVersion;
 
     /// <summary>水面占比，千分比。</summary>
@@ -75,7 +73,7 @@ public class MapMetaData
     // ── 渲染参数（3.1 起，步骤 1 数据契约）──────────────────────────────
     //
     // 这些是**对生成结果的描述**（不是生成器输入）：着色器据此换算海面高度、
-    // 雪线与潮位。老地图没有这些字段，读出来是 0 / 缺省值，由查看器兜底。
+    // 雪线与潮位。V3.2.0 起它们是必需字段（version==3 的 meta 必带）。
 
     /// <summary>海平面（米）。海平面标定后高度场以 0 为海平面，故恒为 0。</summary>
     public float seaLevelMeters;
@@ -106,12 +104,9 @@ public class MapMetaData
         tidePeriodDays = p.tidePeriodDays;
     }
 
-    /// <summary>从 meta 读出渲染参数。老地图（version &lt; 3）用缺省值兜底。</summary>
+    /// <summary>从 meta 读出渲染参数。V3.2.0 起只有 Valid 的 meta 才会走到这里。</summary>
     public WorldTerrain.SurfaceRenderParams GetRenderParams()
     {
-        if (version < 3)
-            return new WorldTerrain.SurfaceRenderParams();
-
         return new WorldTerrain.SurfaceRenderParams
         {
             seaLevelMeters = seaLevelMeters,
@@ -123,28 +118,28 @@ public class MapMetaData
         };
     }
 
-    /// <summary>这张地图有没有配方（老地图没有）。</summary>
+    /// <summary>这张地图有没有配方。</summary>
     public bool HasRecipe => recipeVersion > 0;
 
-    /// <summary>读出配方。老地图（无配方）时用 float 字段尽力折算。</summary>
+    /// <summary>
+    /// 这张 meta 是否是 V3.2.0 认可的**有效地图**：
+    /// version==3 且带整型配方（配方版本与当前生成器一致）。
+    /// </summary>
+    public bool IsValidMap => version >= 3 && HasRecipe;
+
+    /// <summary>读出配方。V3.2.0 起配方是必需的，调用前应先用 <see cref="IsValidMap"/> 校验。</summary>
     public WorldTerrain.MapRecipe ToRecipe()
     {
-        if (HasRecipe)
+        return new WorldTerrain.MapRecipe
         {
-            return new WorldTerrain.MapRecipe
-            {
-                version = recipeVersion,
-                seed = seed,
-                width = mapWidth,
-                waterPermille = waterPermille,
-                tiltMilliDeg = tiltMilliDeg,
-                radiusMeters = radiusMeters,
-                retrograde = rotationRetrograde
-            };
-        }
-
-        return WorldTerrain.MapRecipe.FromParameters(seed, mapWidth, waterCoverage,
-            axialTilt, planetRadiusKm, rotationRetrograde);
+            version = recipeVersion,
+            seed = seed,
+            width = mapWidth,
+            waterPermille = waterPermille,
+            tiltMilliDeg = tiltMilliDeg,
+            radiusMeters = radiusMeters,
+            retrograde = rotationRetrograde
+        };
     }
 
     public static float ClampAxialTilt(float tilt)
@@ -179,7 +174,11 @@ public class MapMetaData
     }
 
     /// <summary>
-    /// 读取地图属性；文件不存在或损坏时返回 null（调用方使用默认值）。
+    /// 读取地图属性；文件不存在、损坏、或**不是有效地图**（无配方 / 版本过旧）时返回 null。
+    ///
+    /// V3.2.0 起这里就是砍掉老地图的关卡：只有 version&gt;=3 且带整型配方的
+    /// meta 才能过。老地图 / 无配方快照在列表与载入两条路径上都读不到 meta，
+    /// 于是不再被当作地图（要查看单张 PNG 请用「导入 PNG」入口）。
     /// </summary>
     public static MapMetaData Load(string mapBaseName)
     {
@@ -195,6 +194,12 @@ public class MapMetaData
             var meta = JsonUtility.FromJson<MapMetaData>(File.ReadAllText(path));
             if (meta == null)
                 return null;
+
+            if (!meta.IsValidMap)
+            {
+                Debug.LogWarning($"MapMetaData: 忽略无配方/旧版 meta（V3.2 起不再支持老地图）：{path}");
+                return null;
+            }
 
             meta.axialTilt = ClampAxialTilt(meta.axialTilt);
             meta.waterCoverage = Mathf.Clamp01(meta.waterCoverage);

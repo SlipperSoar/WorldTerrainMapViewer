@@ -42,11 +42,12 @@ namespace WorldTerrain
         /// <summary>是否逆向自转。查看器据此决定时间流转时太阳的转动方向。</summary>
         public bool rotationRetrograde;
 
-        /// <summary>该地图的 PNG 是否上北下南（2.8.0 起为 true；老地图为 false）。</summary>
-        public bool pngNorthUp;
+        // V3.2.0 起所有 PNG 强制上北下南（第一行 = 北极），不再有 pngNorthUp 标记；
+        // 载入时无条件翻转一次（Unity LoadImage 行序约定）。
 
         /// <summary>
         /// 只有配方、没有 PNG（2.9.0 起的常态）。查看器需要按配方重建后才能显示。
+        /// V3.2.0 起这也是「列表里的地图」唯一合法的形态。
         /// </summary>
         public bool hasRecipe;
 
@@ -67,23 +68,25 @@ namespace WorldTerrain
         /// <summary>板块分界叠加图 PNG（含透明度）。</summary>
         public byte[] plateOverlayPng;
 
-        /// <summary>RGBA 地表数据图 PNG（R=高度/G=水体/B=气温/A=湿度）。步骤 1 数据契约。</summary>
+        /// <summary>RGBA 地表数据图 PNG（R=高度/G=水体分类/B=气温/A=湿度）。步骤 1 数据契约。</summary>
         public byte[] surfacePng;
 
         /// <summary>RGBA 细节图 PNG（R/G=法线/B=AO/A=粗糙度）。步骤 1 数据契约。</summary>
         public byte[] detailPng;
 
         // ── 渲染参数（3.1 起写进 _meta.json，供着色器读取）──
+        // V3.2.0 起这些字段由有效 meta 保证存在；导入的单张 PNG 走另一条路径，
+        // 用缺省值（步骤 2 的辉光不依赖它们）。
 
-        /// <summary>海平面（米）。老地图缺省 0，与「海平面标定后高度场以 0 为海平面」一致。</summary>
+        /// <summary>海平面（米）。海平面标定后高度场以 0 为海平面，故恒为 0。</summary>
         public float seaLevelMeters;
 
-        /// <summary>赤道 / 中纬 / 极地雪线（米）。老地图缺省 0。</summary>
+        /// <summary>赤道 / 中纬 / 极地雪线（米）。</summary>
         public float snowLineEquatorMeters;
         public float snowLineMidMeters;
         public float snowLinePoleMeters;
 
-        /// <summary>潮汐振幅（米）与周期（地球日）。老地图缺省 0。</summary>
+        /// <summary>潮汐振幅（米）与周期（地球日）。</summary>
         public float tideAmplitudeMeters;
         public float tidePeriodDays;
 
@@ -124,9 +127,22 @@ namespace WorldTerrain
         /// <summary>横向像素数 / 竖向像素数（等距圆柱图一般为 2）。</summary>
         public float Aspect => height > 0 ? (float)width / height : 2f;
 
+        /// <summary>把契约里的渲染参数整理成着色器用的结构。</summary>
+        public SurfaceRenderParams RenderParams => new SurfaceRenderParams
+        {
+            seaLevelMeters = seaLevelMeters,
+            snowLineEquatorMeters = snowLineEquatorMeters,
+            snowLineMidMeters = snowLineMidMeters,
+            snowLinePoleMeters = snowLinePoleMeters,
+            tideAmplitudeMeters = tideAmplitudeMeters,
+            tidePeriodDays = tidePeriodDays
+        };
+
         /// <summary>
-        /// 校验契约是否可用（查看器至少需要一张彩色地形图）。返回 false 时
-        /// <paramref name="reason"/> 说明缺什么。
+        /// 校验契约是否可用。V3.2.0 起合法形态有两种：
+        ///   - **有配方**（列表里的常态，只有 _meta.json、没有 PNG）→ 由查看器按配方重建；
+        ///   - **有彩色地形图**（导入的单张 PNG，或用户导出的整包）。
+        /// 两者都没有就拒绝（这正是不再支持的「只有 PNG、没有配方 meta」老地图）。
         /// </summary>
         public bool Validate(out string reason)
         {
@@ -136,9 +152,9 @@ namespace WorldTerrain
                 return false;
             }
 
-            if (!HasTerrain)
+            if (!hasRecipe && !HasTerrain)
             {
-                reason = "缺少彩色地形图 terrainPng";
+                reason = "既没有配方也没有彩色地形图（V3.2 起不再支持无配方老地图）";
                 return false;
             }
 

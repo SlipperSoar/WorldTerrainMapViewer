@@ -41,6 +41,7 @@ public class UIController : MonoBehaviour
     private Toggle _exportPlatesToggle;
     private Toggle _exportHumanToggle;
     private Button _exportButton;
+    private Button _importPngButton;
     private Slider _resolutionSlider;
     private Label _resolutionValue;
     private Label _resolutionHint;
@@ -229,6 +230,7 @@ public class UIController : MonoBehaviour
         _exportPlatesToggle = _root.Q<Toggle>("export-plates");
         _exportHumanToggle = _root.Q<Toggle>("export-human");
         _exportButton = _root.Q<Button>("export-button");
+        _importPngButton = _root.Q<Button>("import-png-button");
         _resolutionSlider = _root.Q<Slider>("resolution-slider");
         _resolutionValue = _root.Q<Label>("resolution-value");
         _resolutionHint = _root.Q<Label>("resolution-hint");
@@ -1073,14 +1075,13 @@ public class UIController : MonoBehaviour
     /// <summary>
     /// 扫描 StreamingAssets，产出地图列表条目。
     ///
-    /// 条目有两种形态：
-    ///   - <c>名字.png</c>      → 按 PNG 载入（老地图、他人分享的整包）
-    ///   - <c>名字_meta.json</c> → 按配方重建（2.9.0 起的常态）
+    /// V3.2.0 起**只列带有效配方的 meta**（<c>名字_meta.json</c>）：
+    /// 地图 = 一份整型配方，选中时按配方重建（生成是确定性的）。
+    /// 只写配方、不写 PNG 是 2.9.0 起的常态。
     ///
-    /// 优先级规则（避免「导出过的地图永远不再用配方」）：
-    ///   1. meta 里有配方且 <b>版本与当前生成器一致</b> → 用配方（保证看到的是当前算法的结果）
-    ///   2. 否则有 PNG → 用 PNG（快照优先，例如旧版本导出的图）
-    ///   3. 只有老配方（版本不一致）且没有 PNG → 仍列出来，按配方尽量重建
+    /// 砍掉老地图后这里不再扫描 PNG 本体：无配方 / 旧版 meta / 只有 PNG 的
+    /// 快照都不再是「地图」（MapMetaData.Load 会过滤无效 meta）。
+    /// 想查看单张 PNG 请用侧栏的「导入 PNG」按钮，它走独立的查看路径。
     /// </summary>
     private void LoadImagesFromStreamingAssets()
     {
@@ -1088,64 +1089,25 @@ public class UIController : MonoBehaviour
         if (!Directory.Exists(streamingPath))
             Directory.CreateDirectory(streamingPath);
 
-        // 收集：baseName → 有没有 PNG
-        var pngBases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var metaBases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        string[] files = Directory.GetFiles(streamingPath, "*.*", SearchOption.TopDirectoryOnly);
+        string[] files = Directory.GetFiles(streamingPath, "*_meta.json", SearchOption.TopDirectoryOnly);
         foreach (string file in files)
         {
             string name = Path.GetFileName(file);
+            string baseName = name.Substring(0, name.Length - "_meta.json".Length);
 
-            if (name.EndsWith("_meta.json", StringComparison.OrdinalIgnoreCase))
-            {
-                metaBases.Add(name.Substring(0, name.Length - "_meta.json".Length));
-                continue;
-            }
-
-            string extension = Path.GetExtension(file).ToLowerInvariant();
-            if (extension != ".png" && extension != ".jpg" && extension != ".jpeg" &&
-                extension != ".bmp" && extension != ".tga" && extension != ".tif" &&
-                extension != ".tiff")
+            // MapMetaData.Load 会拒绝无配方/旧版 meta —— 这正是砍老地图的关卡。
+            MapMetaData meta = MapMetaData.Load(baseName);
+            if (meta == null)
                 continue;
 
-            // 配套文件不算地图本体。判断放在**去扩展名后的 basename** 上：
-            //   - 用 EndsWith 而非 Contains，避免地图名里带 "_surface" 之类子串时误杀本体；
-            //   - 不看扩展名，老地图若用 jpg/tga 存配套图同样能排除。
-            // 3.1 起新增两张数据图（_surface / _detail），必须一起排除，
-            // 否则它们会被当成两张独立地图列进列表。
-            string stem = Path.GetFileNameWithoutExtension(name);
-            if (stem.EndsWith("_height", StringComparison.OrdinalIgnoreCase) ||
-                stem.EndsWith("_plates", StringComparison.OrdinalIgnoreCase) ||
-                stem.EndsWith("_surface", StringComparison.OrdinalIgnoreCase) ||
-                stem.EndsWith("_detail", StringComparison.OrdinalIgnoreCase) ||
-                stem.EndsWith("_lines", StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            pngBases.Add(stem);
+            metaBases.Add(baseName);
         }
 
         var entries = new List<string>();
-
-        foreach (string baseName in pngBases)
-        {
-            bool useRecipe = false;
-            MapMetaData meta = MapMetaData.Load(baseName);
-            if (meta != null && meta.HasRecipe && meta.recipeVersion == MapRecipe.CurrentVersion)
-                useRecipe = true;
-
-            entries.Add(useRecipe ? baseName + "_meta.json" : baseName + ".png");
-        }
-
         foreach (string baseName in metaBases)
-        {
-            if (pngBases.Contains(baseName))
-                continue;                       // 已在上面处理过
-
-            MapMetaData meta = MapMetaData.Load(baseName);
-            if (meta != null && meta.HasRecipe)
-                entries.Add(baseName + "_meta.json");
-        }
+            entries.Add(baseName + "_meta.json");
 
         entries.Sort(StringComparer.Ordinal);
         Debug.Log($"Found {entries.Count} maps in StreamingAssets");
@@ -1182,51 +1144,51 @@ public class UIController : MonoBehaviour
     {
         Debug.Log($"Selected map: {imageName}");
 
-        // 「只有配方」的地图：按配方重建（生成是确定性的，结果与首次生成一致）
-        if (imageName.EndsWith("_meta.json", StringComparison.OrdinalIgnoreCase))
+        // V3.2 起列表里只有「_meta.json」（按配方重建）一种形态。
+        // 单张 PNG 的查看走「导入 PNG」按钮的独立入口，不经过这里。
+        if (!imageName.EndsWith("_meta.json", StringComparison.OrdinalIgnoreCase))
         {
-            string recipeBaseName = imageName.Substring(0, imageName.Length - "_meta.json".Length);
-            _mapFileName.text = recipeBaseName;
-
-            MapMetaData meta = MapMetaData.Load(recipeBaseName);
-            if (meta == null || !meta.HasRecipe)
-            {
-                Debug.LogError($"Recipe missing for {recipeBaseName}");
-                return;
-            }
-
-            if (WorldTerrainGenerator.Instance == null)
-            {
-                Debug.LogError("WorldTerrainGenerator.Instance is null");
-                return;
-            }
-
-            if (_genProgress != null)
-                _genProgress.text = "按配方重建...";
-
-            WorldTerrainGenerator.Instance.onProgress = OnGenerationProgress;
-            WorldTerrainGenerator.Instance.onComplete = OnGenerationComplete;
-            WorldTerrainGenerator.Instance.onError = OnGenerationError;
-            WorldTerrainGenerator.Instance.ShowPlateOverlay =
-                _plateOverlayToggle != null && _plateOverlayToggle.value;
-            WorldTerrainGenerator.Instance.ShowHumanOverlay =
-                _humanOverlayToggle != null && _humanOverlayToggle.value;
-
-            WorldTerrainGenerator.Instance.GenerateFromRecipe(meta.ToRecipe(), recipeBaseName);
+            Debug.LogWarning($"忽略非配方条目（V3.2 起不再支持纯 PNG 地图）：{imageName}");
             return;
         }
 
-        string fullPath = Path.Combine(Application.streamingAssetsPath, imageName);
-        _mapFileName.text = Path.GetFileNameWithoutExtension(imageName);
-        StartCoroutine(LoadTextureCoroutine(fullPath));
+        string recipeBaseName = imageName.Substring(0, imageName.Length - "_meta.json".Length);
+        _mapFileName.text = recipeBaseName;
+
+        MapMetaData meta = MapMetaData.Load(recipeBaseName);
+        if (meta == null || !meta.HasRecipe)
+        {
+            Debug.LogError($"Recipe missing for {recipeBaseName}");
+            return;
+        }
+
+        if (WorldTerrainGenerator.Instance == null)
+        {
+            Debug.LogError("WorldTerrainGenerator.Instance is null");
+            return;
+        }
+
+        if (_genProgress != null)
+            _genProgress.text = "按配方重建...";
+
+        WorldTerrainGenerator.Instance.onProgress = OnGenerationProgress;
+        WorldTerrainGenerator.Instance.onComplete = OnGenerationComplete;
+        WorldTerrainGenerator.Instance.onError = OnGenerationError;
+        WorldTerrainGenerator.Instance.ShowPlateOverlay =
+            _plateOverlayToggle != null && _plateOverlayToggle.value;
+        WorldTerrainGenerator.Instance.ShowHumanOverlay =
+            _humanOverlayToggle != null && _humanOverlayToggle.value;
+
+        WorldTerrainGenerator.Instance.GenerateFromRecipe(meta.ToRecipe(), recipeBaseName);
     }
 
     /// <summary>
-    /// 载入一张地图并应用到星球。
+    /// 兜底路径：把 StreamingAssets 里一个**导出的整包**（有有效 meta + 全套 PNG）
+    /// 读成 <see cref="MapData"/> 契约并直接应用。
     ///
-    /// 不再手工拼各个文件名：先由 <see cref="MapStore"/> 读成 <see cref="MapData"/> 契约，
-    /// 再按契约逐项应用 —— 缺高度图就不做凹凸、缺板块图就隐藏叠加层、
-    /// 缺人文就清空人文图层。新增图层时只需要改契约与这里。
+    /// V3.2 起列表只产生 `_meta.json` 条目（走 <see cref="OnImageItemSelected"/> 的
+    /// 按配方重建），本方法不再从列表触发；保留给「从磁盘直接载入整包」的场景，
+    /// 与「导入 PNG」入口（无 meta、单张图）区分开。
     /// </summary>
     private IEnumerator LoadTextureCoroutine(string filePath)
     {
@@ -1250,7 +1212,7 @@ public class UIController : MonoBehaviour
 
         if (map == null)
         {
-            Debug.LogError($"载入地图失败：找不到 {baseName} 的地形图");
+            Debug.LogError("载入地图失败：找不到地形图");
             yield break;
         }
 
@@ -1265,12 +1227,23 @@ public class UIController : MonoBehaviour
         if (WorldTerrainGenerator.Instance != null)
             WorldTerrainGenerator.Instance.NotifyExternalMapSelected(baseName);
 
+        ApplyMapToEarth(map, baseName, true, filePath);
+        yield return null;
+    }
+
+    /// <summary>
+    /// 把一份 <see cref="MapData"/> 契约应用到星球（列表载入与「导入 PNG」共用）。
+    /// 缺图层就关掉对应效果：高度图→清凹凸、板块图→隐藏叠加层、数据图→关 Fresnel 等。
+    /// </summary>
+    /// <param name="loadAnnotations">是否载入用户标注（独立导入的 PNG 不载入标注）。</param>
+    private void ApplyMapToEarth(MapData map, string baseName, bool loadAnnotations, string sourceLabel)
+    {
         // ── 彩色地形图（必需）──
-        Texture2D terrainTex = DecodeTexture(map.terrainPng, false, map.pngNorthUp);
+        Texture2D terrainTex = DecodeTexture(map.terrainPng, false);
         if (terrainTex == null)
         {
-            Debug.LogError($"地形图解码失败：{filePath}");
-            yield break;
+            Debug.LogError($"地形图解码失败：{sourceLabel}");
+            return;
         }
 
         if (_currentTexture != null)
@@ -1279,14 +1252,24 @@ public class UIController : MonoBehaviour
         EarthManager.Instance.SetEarthSurface(terrainTex);
 
         // ── 高度图（可选：没有就不做地形凹凸）──
-        Texture2D heightTex = map.HasHeight ? DecodeTexture(map.heightPng, true, map.pngNorthUp) : null;
+        // 导入的单张 PNG 没有高度图：必须清掉材质里残留的 _HeightTex / _HeightScale，
+        // 关掉位移 keyword，并把「地形凹凸」开关也关掉。否则 shader 会采样 null 高度图
+        // 得到恒定 -1 的高度，整个球面被位移、法线全乱（显示混乱不堪）。
+        Texture2D heightTex = map.HasHeight ? DecodeTexture(map.heightPng, true) : null;
         if (heightTex != null)
+        {
             EarthManager.Instance.SetEarthHeightMap(heightTex);
+        }
         else
-            EarthManager.Instance.ClearEarthHeightMap();
+        {
+            EarthManager.Instance.ClearEarthHeightMap();   // 内部已 DisableKeyword
+            if (_terrainDisplacementToggle != null)
+                _terrainDisplacementToggle.SetValueWithoutNotify(false);
+            EarthManager.Instance.SetTerrainDisplacement(false);
+        }
 
         // ── 板块分界叠加图（可选）──
-        Texture2D plateTex = map.HasPlateOverlay ? DecodeTexture(map.plateOverlayPng, false, map.pngNorthUp) : null;
+        Texture2D plateTex = map.HasPlateOverlay ? DecodeTexture(map.plateOverlayPng, false) : null;
         if (plateTex != null)
         {
             EarthManager.Instance.SetPlateOverlay(plateTex);
@@ -1298,6 +1281,14 @@ public class UIController : MonoBehaviour
         {
             EarthManager.Instance.SetPlateOverlayVisible(false);
         }
+
+        // ── 步骤 2.0：两张数据图 + 渲染参数接到地表材质 ──
+        // 数据图必须 linear（避免 gamma 污染数值）；surface 的 G 是分类值，
+        // 用 Point 过滤避免 Bilinear 插值把「河」抹成「海」。
+        // 缺图时传 null，shader 会关掉对应效果（导入的单张 PNG 就是这种情形）。
+        Texture2D surfaceTex = map.HasSurface ? DecodeTexture(map.surfacePng, true, true) : null;
+        Texture2D detailTex = map.HasDetail ? DecodeTexture(map.detailPng, true) : null;
+        EarthManager.Instance.SetSurfaceData(surfaceTex, detailTex, map.RenderParams);
 
         // ── 地图属性（地轴倾角、水面占比）：都已在契约里 ──
         ApplyMapProperties(map);
@@ -1312,17 +1303,26 @@ public class UIController : MonoBehaviour
                 _humanOverlayToggle != null && _humanOverlayToggle.value);
         }
 
-        Debug.Log($"已载入地图 {map}");
+        Debug.Log($"已载入地图 {map}（来源 {sourceLabel}）");
 
         // ── 用户标注（不属于地图内容，单独载入）──
-        EarthManager.Instance.LoadLinesFromJSON(baseName);
-        EarthManager.Instance.LoadMarkersFromJSON(baseName);
-
-        yield return null;
+        if (loadAnnotations)
+        {
+            EarthManager.Instance.LoadLinesFromJSON(baseName);
+            EarthManager.Instance.LoadMarkersFromJSON(baseName);
+        }
     }
 
-    /// <summary>把 PNG 字节解成贴图；失败返回 null。</summary>
-    private static Texture2D DecodeTexture(byte[] png, bool linear, bool northUp)
+    /// <summary>
+    /// 把 PNG 字节解成贴图；失败返回 null。
+    ///
+    /// V3.2.0 起所有 PNG **强制上北下南**（第一行 = 北极）。翻转不再是「兼容选项」，
+    /// 而是 Unity 行序约定的固定一步：LoadImage 把图像最后一行放到贴图第 0 行，
+    /// 而着色器 uv.y=0 在北极，所以必须无条件翻回来。
+    /// </summary>
+    /// <param name="linear">数据图（高度/surface/detail）必须 true，避免 sRGB gamma 污染数值。</param>
+    /// <param name="point">分类/掩膜类数据图用 Point 过滤，避免 Bilinear 插值抹平类别值。</param>
+    private static Texture2D DecodeTexture(byte[] png, bool linear, bool point = false)
     {
         if (png == null || png.Length == 0)
             return null;
@@ -1334,12 +1334,9 @@ public class UIController : MonoBehaviour
             return null;
         }
 
-        // PNG 是「上北下南」，而 Unity 的 uv.y=0（贴图第 0 行）对应北极。
-        // LoadImage 把图像最后一行放到第 0 行，所以上北下南的文件需要再翻一次。
-        if (northUp)
-            FlipVertical(tex);
+        FlipVertical(tex);
 
-        tex.filterMode = FilterMode.Bilinear;
+        tex.filterMode = point ? FilterMode.Point : FilterMode.Bilinear;
         tex.wrapMode = TextureWrapMode.Repeat;
 
         // 释放 CPU 侧像素副本：显示只需要 GPU 那份。
@@ -1520,6 +1517,11 @@ public class UIController : MonoBehaviour
             _exportButton.clicked += OnExportButtonClicked;
         }
 
+        if (_importPngButton != null)
+        {
+            _importPngButton.clicked += OnImportPngButtonClicked;
+        }
+
         // 生成分辨率：滑条走 4 个离散档位（1024 / 2048 / 4096 / 8192 宽度）
         if (_resolutionSlider != null)
         {
@@ -1639,6 +1641,74 @@ public class UIController : MonoBehaviour
                     ? "请先生成或重建一张地图再导出"
                     : "导出失败：" + name + "（磁盘快照无需再导出）";
         }
+    }
+
+    /// <summary>
+    /// 「导入 PNG 查看」：V3.2.0 起砍掉老地图后保留的**独立入口**。
+    ///
+    /// 用户选一张任意路径的 PNG，直接解码显示，不要求 _meta.json / 配方，
+    /// 也不进地图列表。构造的 MapData 只有 terrainPng（无数据图 → shader 自动
+    /// 关掉 Fresnel 等步骤 2 效果），渲染参数用缺省值。
+    ///
+    /// 编辑器里用 EditorUtility.OpenFilePanel 弹系统选择框；打包后的播放器
+    /// 没有该 API，退化为从 StreamingAssets 下的 "import.png" 读取（把要查看的
+    /// 图片放进去改名即可）。
+    /// </summary>
+    private void OnImportPngButtonClicked()
+    {
+        string path = null;
+
+#if UNITY_EDITOR
+        path = EditorUtility.OpenFilePanel("导入 PNG 查看", "", "png,jpg,jpeg,bmp,tga");
+#else
+        path = Path.Combine(Application.streamingAssetsPath, "import.png");
+        if (!File.Exists(path))
+        {
+            Debug.LogWarning("播放器模式下请把要查看的图片放到 StreamingAssets/import.png");
+            if (_genProgress != null) _genProgress.text = "请放置 StreamingAssets/import.png";
+            return;
+        }
+#endif
+
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            return;
+
+        StartCoroutine(ImportPngCoroutine(path));
+    }
+
+    private IEnumerator ImportPngCoroutine(string path)
+    {
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(path);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"导入 PNG 读取失败：{e.Message}");
+            yield break;
+        }
+
+        // 最小契约：只有一张图，没有配方 / meta / 数据图。
+        var map = new MapData
+        {
+            baseName = Path.GetFileNameWithoutExtension(path),
+            terrainPng = bytes,
+            axialTilt = MapMetaData.DefaultAxialTilt,
+            waterCoverage = 0.5f,
+            planetRadiusKm = PlanetProfile.DefaultRadiusKm,
+            hasRecipe = false
+        };
+
+        // 导入的不是本次生成的产物：同步生成器的「当前地图」，避免误导出上一次的图。
+        if (WorldTerrainGenerator.Instance != null)
+            WorldTerrainGenerator.Instance.NotifyExternalMapSelected(map.baseName);
+
+        if (_mapFileName != null)
+            _mapFileName.text = map.baseName + "（导入）";
+
+        ApplyMapToEarth(map, map.baseName, false, path);
+        yield return null;
     }
 
     private void OnGenerateButtonClicked()

@@ -8,7 +8,20 @@ Shader "Custom/EarthSurfaceLitShader"
         _Color ("Color", Color) = (1,1,1,1)
         _Specular ("Specular", Color) = (0.2,0.2,0.2,1)
         _Glossiness ("Glossiness", Range(0, 1)) = 0.5
+
+        // ── 步骤 2.0：数据契约贴图 + 渲染参数 ──
+        _SurfaceTex ("Surface Data (R=h G=water B=temp A=moist)", 2D) = "black" {}
+        _DetailTex ("Detail (RG=normal B=ao A=rough)", 2D) = "black" {}
+        _SeaLevel ("Sea Level (m)", Float) = 0
+        _SnowLineEquator ("Snow Line Equator (m)", Float) = 0
+        _SnowLineMid ("Snow Line Mid (m)", Float) = 0
+        _SnowLinePole ("Snow Line Pole (m)", Float) = 0
+        _TideAmplitude ("Tide Amplitude (m)", Float) = 2
+        _TidePeriod ("Tide Period (days)", Float) = 0.5
     }
+
+    // 注：Fresnel 边缘辉光已移到独立的 Custom/AtmosphereGlowShader 球壳
+    // （见 AtmosphereGlow.cs）。放在地表 frag 里会贴着凹凸变形的表面，且被云层盖住。
     SubShader
     {
         Tags { "RenderType"="Opaque" }
@@ -24,6 +37,9 @@ Shader "Custom/EarthSurfaceLitShader"
             #pragma multi_compile_fwdbase
             #pragma multi_compile_fog
             #pragma multi_compile _ _TERRAIN_DISPLACEMENT_ON
+            // local keyword：C# 侧用 material.EnableKeyword/SetKeyword 设置的是 local keyword。
+            // 保留供步骤 2 后续的独立水面 pass / 法线贴图使用（当前地表 pass 尚未消费数据图）。
+            #pragma multi_compile_local _ _SURFACE_DATA_ON
 
             #include "UnityCG.cginc"
             #include "Lighting.cginc"
@@ -55,6 +71,14 @@ Shader "Custom/EarthSurfaceLitShader"
             fixed4 _Color;
             fixed4 _Specular;
             float _Glossiness;
+
+            // ── 步骤 2.0：数据契约贴图 + 渲染参数 ──
+            // 地表 shader 暂时只接收这些 uniform，实际消费在步骤 2 后续的独立水面 pass /
+            // 法线贴图里。Fresnel 辉光已移到独立球壳，不在这里计算。
+            sampler2D _SurfaceTex;
+            sampler2D _DetailTex;
+            float _SeaLevel, _SnowLineEquator, _SnowLineMid, _SnowLinePole;
+            float _TideAmplitude, _TidePeriod;
 
             float2 EquirectangularUV(float3 localPos)
             {
@@ -149,11 +173,12 @@ Shader "Custom/EarthSurfaceLitShader"
                 fixed3 ambient = UNITY_LIGHTMODEL_AMBIENT.rgb * col.rgb;
                 fixed3 diffuse = col.rgb * _LightColor0.rgb * NdotL;
                 fixed3 spec = specular * _LightColor0.rgb;
-                
+
+                // Fresnel 辉光由独立的 AtmosphereGlowShader 球壳渲染，不在这里叠加。
                 fixed4 finalColor;
                 finalColor.rgb = ambient + diffuse + spec;
                 finalColor.a = col.a;
-                
+
                 UNITY_APPLY_FOG(i.fogCoord, finalColor);
                 return finalColor;
             }
@@ -171,6 +196,9 @@ Shader "Custom/EarthSurfaceLitShader"
             #pragma multi_compile_fwdadd
             #pragma multi_compile_fog
             #pragma multi_compile _ _TERRAIN_DISPLACEMENT_ON
+            // 与 ForwardBase 保持一致的 local keyword 集合；本 pass 不采样数据图，
+            // 也不加辉光（Blend One One 叠加，重复加会双倍）。声明只为变体匹配一致。
+            #pragma multi_compile_local _ _SURFACE_DATA_ON
 
             #include "UnityCG.cginc"
             #include "Lighting.cginc"

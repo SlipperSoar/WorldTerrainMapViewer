@@ -15,7 +15,11 @@ public class MapMetaData
     public const float MinAxialTilt = 0f;
     public const float MaxAxialTilt = 90f;
 
-    /// <summary>元数据格式版本。</summary>
+    /// <summary>
+    /// 元数据格式版本。
+    /// 3.1（V3.1.0）起加入「渲染参数」字段（海平面 / 雪线 / 潮汐），
+    /// 版本升到 3 以便查看器区分「有渲染参数」与老地图；字段缺失时按缺省值处理。
+    /// </summary>
     public int version = 1;
 
     /// <summary>地轴倾角（黄赤交角），单位：度，范围 0-90。</summary>
@@ -67,6 +71,57 @@ public class MapMetaData
 
     /// <summary>人文信息摘要（聚落/国家/交通线数量，完整数据在同名 _human.json 中）。</summary>
     public HumanMapSummary human = new HumanMapSummary();
+
+    // ── 渲染参数（3.1 起，步骤 1 数据契约）──────────────────────────────
+    //
+    // 这些是**对生成结果的描述**（不是生成器输入）：着色器据此换算海面高度、
+    // 雪线与潮位。老地图没有这些字段，读出来是 0 / 缺省值，由查看器兜底。
+
+    /// <summary>海平面（米）。海平面标定后高度场以 0 为海平面，故恒为 0。</summary>
+    public float seaLevelMeters;
+
+    /// <summary>赤道雪线（米，按地图起伏标定）。</summary>
+    public float snowLineEquatorMeters;
+
+    /// <summary>中纬（45°）雪线（米）。</summary>
+    public float snowLineMidMeters;
+
+    /// <summary>极地雪线（米，通常为 0）。</summary>
+    public float snowLinePoleMeters;
+
+    /// <summary>潮汐振幅（米）。</summary>
+    public float tideAmplitudeMeters;
+
+    /// <summary>潮汐周期（地球日）。</summary>
+    public float tidePeriodDays;
+
+    /// <summary>把渲染参数填进 meta（3.1 起）。</summary>
+    public void SetRenderParams(WorldTerrain.SurfaceRenderParams p)
+    {
+        seaLevelMeters = p.seaLevelMeters;
+        snowLineEquatorMeters = p.snowLineEquatorMeters;
+        snowLineMidMeters = p.snowLineMidMeters;
+        snowLinePoleMeters = p.snowLinePoleMeters;
+        tideAmplitudeMeters = p.tideAmplitudeMeters;
+        tidePeriodDays = p.tidePeriodDays;
+    }
+
+    /// <summary>从 meta 读出渲染参数。老地图（version &lt; 3）用缺省值兜底。</summary>
+    public WorldTerrain.SurfaceRenderParams GetRenderParams()
+    {
+        if (version < 3)
+            return new WorldTerrain.SurfaceRenderParams();
+
+        return new WorldTerrain.SurfaceRenderParams
+        {
+            seaLevelMeters = seaLevelMeters,
+            snowLineEquatorMeters = snowLineEquatorMeters,
+            snowLineMidMeters = snowLineMidMeters,
+            snowLinePoleMeters = snowLinePoleMeters,
+            tideAmplitudeMeters = tideAmplitudeMeters,
+            tidePeriodDays = tidePeriodDays
+        };
+    }
 
     /// <summary>这张地图有没有配方（老地图没有）。</summary>
     public bool HasRecipe => recipeVersion > 0;

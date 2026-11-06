@@ -18,6 +18,12 @@ namespace WorldTerrain
     /// </summary>
     public static class TerrainMapRenderer
     {
+        /// <summary>细节图法线强度：梯度经 <c>reliefScale</c> 归一化后再乘这个系数。</summary>
+        public const float DetailNormalStrength = 0.5f;
+
+        /// <summary>细节图 AO 随坡度变暗的最大幅度（0 = 不做 AO）。</summary>
+        public const float DetailAoStrength = 0.5f;
+
         /// <summary>把浮点颜色量化成 8 位（四舍五入，与 Unity 的 Color32 转换一致）。</summary>
         private static Color32 Quantize(Color c)
         {

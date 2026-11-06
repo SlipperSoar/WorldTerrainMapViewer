@@ -122,10 +122,12 @@ GenerationPipeline.CreateDefault()         ← 有序步骤表
 
 | 契约字段 | 内容 |
 |---|---|
-| `terrainPng` / `heightPng` / `plateOverlayPng` | 三张图的 **PNG 字节**（缺失则为 null） |
+| `terrainPng` / `heightPng` / `plateOverlayPng` | 三张可见图的 **PNG 字节**（缺失则为 null） |
+| `surfacePng` / `detailPng` | 两张 **RGBA 数据图**的 PNG 字节（3.1 起，见下） |
 | `axialTilt` / `waterCoverage` / `seed` / `generatedAt` | 地图属性 |
+| `seaLevelMeters` / `snowLine*Meters` / `tide*Meters` / `tidePeriodDays` | 渲染参数（3.1 起，写进 `_meta.json`） |
 | `human` | 人文数据（null = 没生成人文） |
-| `HasTerrain` / `HasHeight` / `HasPlateOverlay` / `HasHuman` / `HasClimate` | 图层存在性 |
+| `HasTerrain` / `HasHeight` / `HasPlateOverlay` / `HasSurface` / `HasDetail` / `HasHuman` / `HasClimate` | 图层存在性 |
 | `Validate(out reason)` | 查看器载入前的契约校验 |
 
 读写由 `MapStore` 负责（`Load` / `Save` / `FromResult` / `ListMapNames`），
@@ -133,6 +135,25 @@ GenerationPipeline.CreateDefault()         ← 有序步骤表
 所以「外部导入符合格式的地图」只需构造一个 `MapData` 交给查看器。
 
 > 标记与线条**不在**契约里：它们是浏览期的用户标注，不属于地图内容。
+
+#### 行星渲染数据契约（3.1 起）
+
+行星渲染改造的步骤 1 新增两张 **RGBA8 数据贴图**（不是给人看的彩色图），
+只在用户点「导出当前地图」时随整包落盘，生成时仍只写 `_meta.json`：
+
+| 文件 | R | G | B | A |
+|---|---|---|---|---|
+| `<名字>_surface.png` | 高度（米，-10000~10000） | 水体硬掩膜（0/255） | 气温（℃，-40~40） | 湿度（0~1） |
+| `<名字>_detail.png` | 法线 X | 法线 Y | AO | 粗糙度 |
+
+两张图与可见三图一样**上北下南**（第一行 = 北极）、由 `PngStreamWriter` 流式写出、
+线性非 sRGB。`_meta.json`（version 3）同时补上**海平面 / 赤道·中纬·极地雪线 /
+潮汐振幅·周期**六项渲染参数，供后续步骤的着色器换算海面、雪线与潮位。
+老地图缺这些字段时按缺省值兜底，载入不受影响。
+
+编码常量在 `SurfaceContract`，解码公式与外部解码校验见
+[VERIFICATION.md 第 19 节](VERIFICATION.md#19-数据契约v310行星渲染步骤-1)。
+新增图层**只读取生成结果、不改生成语义**，11 个 dump 指纹逐位不变。
 
 ### 气候与侵蚀（贴近真实地球的部分）
 

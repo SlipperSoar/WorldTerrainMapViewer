@@ -55,7 +55,8 @@ public static class GenerationProbe
             var sw = System.Diagnostics.Stopwatch.StartNew();
             long exportPeak = GC.GetTotalMemory(false);
 
-            foreach (MapLayer layer in new[] { MapLayer.Terrain, MapLayer.Height, MapLayer.Plates })
+            foreach (MapLayer layer in new[] { MapLayer.Terrain, MapLayer.Height, MapLayer.Plates,
+                                              MapLayer.Surface, MapLayer.Detail })
             {
                 string path = Path.Combine(outDir, layer + ".png");
                 bool ok = MapExporter.WritePng(ctx, layer, path);
@@ -85,7 +86,8 @@ public static class GenerationProbe
         /// <summary>
         /// 验证「只存配方 / 导出整包」这条链路：
         ///   1. SaveRecipe 后应当只有 _meta.json，没有 PNG
-        ///   2. ExportFull 后五件套齐全（地形/高度/板块/人文/meta）
+        ///   2. ExportFull 后七件套齐全（地形/高度/板块/地表/细节/人文/meta）
+        ///   3. meta 里的渲染参数与按高度场重算的一致（同一配方两次生成逐位一致）
         /// </summary>
         static void VerifyPublishFlow()
         {
@@ -95,24 +97,38 @@ public static class GenerationProbe
             string name = "probe_publish";
             MapStore.Paths paths = MapStore.GetPaths(name);
 
-            foreach (string f in new[] { paths.terrain, paths.height, paths.plates, paths.human, paths.meta })
+            string[] allFiles = { paths.terrain, paths.height, paths.plates,
+                                  paths.surface, paths.detail, paths.human, paths.meta };
+            foreach (string f in allFiles)
                 if (File.Exists(f)) File.Delete(f);
 
             bool saved = MapPublisher.SaveRecipe(ctx, recipe, name);
             bool metaOnly =
                 File.Exists(paths.meta) &&
-                !File.Exists(paths.terrain) && !File.Exists(paths.height) && !File.Exists(paths.plates);
+                !File.Exists(paths.terrain) && !File.Exists(paths.height) && !File.Exists(paths.plates) &&
+                !File.Exists(paths.surface) && !File.Exists(paths.detail);
             Debug.Log($"[probe] SaveRecipe={saved} 只有 meta={metaOnly}");
 
             bool exported = MapPublisher.ExportFull(ctx, recipe, name, MapExportOptions.All);
-            bool full =
-                File.Exists(paths.terrain) && File.Exists(paths.height) &&
-                File.Exists(paths.plates) && File.Exists(paths.human) && File.Exists(paths.meta);
+            bool full = true;
+            foreach (string f in allFiles)
+                if (!File.Exists(f)) full = false;
             long size = File.Exists(paths.terrain) ? new FileInfo(paths.terrain).Length : 0;
-            Debug.Log($"[probe] ExportFull={exported} 五件套齐全={full} 地形图={size / 1024} KB");
+            Debug.Log($"[probe] ExportFull={exported} 七件套齐全={full} 地形图={size / 1024} KB");
+
+            // 渲染参数自检：meta 写出的值 == 由高度场 + 倾角重算的值
+            var meta = MapMetaData.Load(name);
+            var expected = SurfaceDataLayers.ComputeRenderParams(ctx);
+            bool paramsOk = meta != null && meta.version >= 3 &&
+                Math.Abs(meta.seaLevelMeters - expected.seaLevelMeters) < 1e-3f &&
+                Math.Abs(meta.snowLineEquatorMeters - expected.snowLineEquatorMeters) < 1e-2f &&
+                Math.Abs(meta.tideAmplitudeMeters - expected.tideAmplitudeMeters) < 1e-3f;
+            Debug.Log($"[probe] 渲染参数 meta v{(meta != null ? meta.version : -1)} " +
+                      $"雪线(赤道)={(meta != null ? meta.snowLineEquatorMeters : -1f):F0}m " +
+                      $"潮汐振幅={(meta != null ? meta.tideAmplitudeMeters : -1f):F1}m 一致={paramsOk}");
 
             // 清理，避免污染 StreamingAssets
-            foreach (string f in new[] { paths.terrain, paths.height, paths.plates, paths.human, paths.meta })
+            foreach (string f in allFiles)
                 if (File.Exists(f)) File.Delete(f);
         }
 

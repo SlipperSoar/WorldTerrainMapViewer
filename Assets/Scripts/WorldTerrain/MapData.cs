@@ -6,7 +6,8 @@ namespace WorldTerrain
     /// **生成器与查看器之间的数据契约**。
     ///
     /// 一张地图"是什么"只由这个类描述：
-    ///   - 三张图（彩色地形图 / 灰度高度图 / 板块分界叠加图）的 PNG 字节
+    ///   - 五张图（彩色地形图 / 灰度高度图 / 板块分界叠加图 /
+    ///     RGBA 地表数据图 / RGBA 细节图）的 PNG 字节
     ///   - 地图属性（地轴倾角、水面占比、种子、生成时间）
     ///   - 人文数据（聚落 / 国家 / 交通线 / 自然地名），可为空
     ///   - 气候数据（湿度场），从人文数据里取
@@ -66,6 +67,26 @@ namespace WorldTerrain
         /// <summary>板块分界叠加图 PNG（含透明度）。</summary>
         public byte[] plateOverlayPng;
 
+        /// <summary>RGBA 地表数据图 PNG（R=高度/G=水体/B=气温/A=湿度）。步骤 1 数据契约。</summary>
+        public byte[] surfacePng;
+
+        /// <summary>RGBA 细节图 PNG（R/G=法线/B=AO/A=粗糙度）。步骤 1 数据契约。</summary>
+        public byte[] detailPng;
+
+        // ── 渲染参数（3.1 起写进 _meta.json，供着色器读取）──
+
+        /// <summary>海平面（米）。老地图缺省 0，与「海平面标定后高度场以 0 为海平面」一致。</summary>
+        public float seaLevelMeters;
+
+        /// <summary>赤道 / 中纬 / 极地雪线（米）。老地图缺省 0。</summary>
+        public float snowLineEquatorMeters;
+        public float snowLineMidMeters;
+        public float snowLinePoleMeters;
+
+        /// <summary>潮汐振幅（米）与周期（地球日）。老地图缺省 0。</summary>
+        public float tideAmplitudeMeters;
+        public float tidePeriodDays;
+
         // ── 人文 / 气候 ──
 
         /// <summary>人文数据；null 表示这张地图没有生成人文。</summary>
@@ -81,6 +102,12 @@ namespace WorldTerrain
 
         /// <summary>是否有板块分界叠加图。</summary>
         public bool HasPlateOverlay => plateOverlayPng != null && plateOverlayPng.Length > 0;
+
+        /// <summary>是否有 RGBA 地表数据图（步骤 2 的独立水面 pass 依赖它）。</summary>
+        public bool HasSurface => surfacePng != null && surfacePng.Length > 0;
+
+        /// <summary>是否有 RGBA 细节图（步骤 2 的法线贴图依赖它）。</summary>
+        public bool HasDetail => detailPng != null && detailPng.Length > 0;
 
         /// <summary>是否有人文数据（聚落等内容）。</summary>
         public bool HasHuman => human != null && human.HasContent;

@@ -10,6 +10,8 @@ using WorldTerrain;
 ///   &lt;名字&gt;.png           彩色地形图
 ///   &lt;名字&gt;_height.png    灰度高度图
 ///   &lt;名字&gt;_plates.png    板块分界叠加图
+///   &lt;名字&gt;_surface.png   RGBA 地表数据图（3.1 起，步骤 1 数据契约）
+///   &lt;名字&gt;_detail.png    RGBA 细节图（3.1 起，步骤 1 数据契约）
 ///   &lt;名字&gt;_meta.json     地图属性
 ///   &lt;名字&gt;_human.json    人文 + 气候（湿度场）
 ///
@@ -24,12 +26,16 @@ public static class MapStore
         public string terrain;
         public string height;
         public string plates;
+        public string surface;
+        public string detail;
         public string meta;
         public string human;
 
         public bool HasTerrain => File.Exists(terrain);
         public bool HasHeight => File.Exists(height);
         public bool HasPlates => File.Exists(plates);
+        public bool HasSurface => File.Exists(surface);
+        public bool HasDetail => File.Exists(detail);
         public bool HasMeta => File.Exists(meta);
         public bool HasHuman => File.Exists(human);
     }
@@ -43,6 +49,8 @@ public static class MapStore
             terrain = Path.Combine(root, baseName + ".png"),
             height = Path.Combine(root, baseName + "_height.png"),
             plates = Path.Combine(root, baseName + "_plates.png"),
+            surface = Path.Combine(root, baseName + "_surface.png"),
+            detail = Path.Combine(root, baseName + "_detail.png"),
             meta = Path.Combine(root, baseName + "_meta.json"),
             human = Path.Combine(root, baseName + "_human.json")
         };
@@ -70,7 +78,7 @@ public static class MapStore
                 return null;
             }
 
-            return new MapData
+            var recipeOnly = new MapData
             {
                 baseName = baseName,
                 hasRecipe = true,
@@ -86,6 +94,8 @@ public static class MapStore
                 generatedAt = onlyMeta.generatedAt,
                 human = HumanGeographyData.Load(baseName)
             };
+            ApplyRenderParams(recipeOnly, onlyMeta);
+            return recipeOnly;
         }
 
         var data = new MapData
@@ -93,7 +103,9 @@ public static class MapStore
             baseName = baseName,
             terrainPng = ReadBytesOrNull(paths.terrain),
             heightPng = ReadBytesOrNull(paths.height),
-            plateOverlayPng = ReadBytesOrNull(paths.plates)
+            plateOverlayPng = ReadBytesOrNull(paths.plates),
+            surfacePng = ReadBytesOrNull(paths.surface),
+            detailPng = ReadBytesOrNull(paths.detail)
         };
 
         MapMetaData meta = MapMetaData.Load(baseName);
@@ -108,6 +120,7 @@ public static class MapStore
             data.generatedAt = meta.generatedAt;
             data.width = meta.mapWidth;
             data.height = meta.mapHeight;
+            ApplyRenderParams(data, meta);
         }
 
         data.human = HumanGeographyData.Load(baseName);
@@ -120,6 +133,18 @@ public static class MapStore
     }
 
     // ── 内部 ──
+
+    /// <summary>把 meta 里的渲染参数投到数据契约上（老地图由 GetRenderParams 兜底）。</summary>
+    private static void ApplyRenderParams(MapData data, MapMetaData meta)
+    {
+        WorldTerrain.SurfaceRenderParams p = meta.GetRenderParams();
+        data.seaLevelMeters = p.seaLevelMeters;
+        data.snowLineEquatorMeters = p.snowLineEquatorMeters;
+        data.snowLineMidMeters = p.snowLineMidMeters;
+        data.snowLinePoleMeters = p.snowLinePoleMeters;
+        data.tideAmplitudeMeters = p.tideAmplitudeMeters;
+        data.tidePeriodDays = p.tidePeriodDays;
+    }
 
     private static byte[] ReadBytesOrNull(string path)
     {

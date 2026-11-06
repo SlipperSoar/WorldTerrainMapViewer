@@ -177,6 +177,87 @@ namespace WorldTerrain
     }
 
     /// <summary>
+    /// 行星渲染「数据契约」的编码常量（步骤 1）。
+    ///
+    /// 两张新图都是 **RGBA8 数据贴图**（不是给人看的彩色图），供后续步骤的着色器采样：
+    ///   - <c>_surface.png</c>：R=高度、G=水体、B=气温、A=湿度
+    ///   - <c>_detail.png</c> ：R/G=切线空间法线 XY、B=AO、A=粗糙度
+    ///
+    /// 所有编码都只用整数与 <see cref="System.Math"/>，可在后台线程 / 离线校验台运行。
+    /// 解码公式与这里一一对应，改一个必须同时改另一个，并更新 VERIFICATION.md。
+    /// </summary>
+    public static class SurfaceContract
+    {
+        /// <summary>高度编码范围（米）：与 <c>WorldGenConfig</c> 的 min/maxElevation 一致。</summary>
+        public const float HeightMinMeters = -10000f;
+        public const float HeightMaxMeters = 10000f;
+
+        /// <summary>气温编码范围（℃，最热月平均气温的钳制区间）。</summary>
+        public const double TemperatureMinC = -40.0;
+        public const double TemperatureMaxC = 40.0;
+
+        /// <summary>湿度本身已在 0-1，直接线性编码。</summary>
+        public const double MoistureMin = 0.0;
+        public const double MoistureMax = 1.0;
+
+        /// <summary>水体通道：非黑即白（硬掩膜，供独立水面 pass 使用）。</summary>
+        public const byte WaterValue = 255;
+        public const byte LandValue = 0;
+
+        /// <summary>法线 XY 编码到 0-255（解码时 <c>xy = c/255*2-1</c>，Z 在着色器里重建）。</summary>
+        public const float NormalNeutral = 0.5f;
+
+        /// <summary>把物理量线性量化到 0-255（四舍五入，与 TerrainMapRenderer.ToByte 一致）。</summary>
+        public static byte Encode(double value, double min, double max)
+        {
+            if (max <= min) return 0;
+            double t = (value - min) / (max - min);
+            if (t <= 0.0) return 0;
+            if (t >= 1.0) return 255;
+            return (byte)System.Math.Round(t * 255.0);
+        }
+    }
+
+    /// <summary>
+    /// 「渲染参数」：写进 <c>_meta.json</c>、供着色器读取的**可复现标量**。
+    ///
+    /// 这些值不是生成器输入（改它们不会改变地形），而是对生成结果的**描述** ——
+    /// 海平面、雪线、潮汐。步骤 2/3/4 的着色器据此换算海面高度、雪线与潮位。
+    /// 全部由生成参数与结果确定，因此同一配方两次生成必然得到同一组值。
+    ///
+    /// 这里刻意做成**只含字段的普通类**（不引用 <c>TerrainContext</c>、<c>PolarClimate</c>），
+    /// 计算逻辑放在 <c>SurfaceDataLayers.ComputeRenderParams</c>：离线校验台会直接编译本文件，
+    /// 但不一定把那些类型一起编进来，保持本文件零依赖才不会破坏 gate / icecheck。
+    /// </summary>
+    [System.Serializable]
+    public class SurfaceRenderParams
+    {
+        /// <summary>海平面（米）。高度场在「海平面标定」步骤已平移到海平面=0，故恒为 0。</summary>
+        public float seaLevelMeters;
+
+        /// <summary>赤道雪线（米，按地图起伏标定，湿润侧）。</summary>
+        public float snowLineEquatorMeters;
+
+        /// <summary>中纬（45°）雪线（米）。</summary>
+        public float snowLineMidMeters;
+
+        /// <summary>极地雪线（米，通常为 0，表示海平面即终年积雪）。</summary>
+        public float snowLinePoleMeters;
+
+        /// <summary>潮汐振幅（米）：海面相对海平面的最大升降，步骤 4 的简化潮汐用。</summary>
+        public float tideAmplitudeMeters = DefaultTideAmplitudeMeters;
+
+        /// <summary>潮汐周期（地球日）。</summary>
+        public float tidePeriodDays = DefaultTidePeriodDays;
+
+        /// <summary>默认潮汐振幅（米）：量级参考地球，不至于把 1~2 km 起伏的地图淹没。</summary>
+        public const float DefaultTideAmplitudeMeters = 2f;
+
+        /// <summary>默认潮汐周期（地球日，半日潮的近似包络）。</summary>
+        public const float DefaultTidePeriodDays = 0.5f;
+    }
+
+    /// <summary>
     /// Complete result of a world generation run.
     /// </summary>
     public class WorldGenResult

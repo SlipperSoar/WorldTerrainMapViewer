@@ -8,7 +8,13 @@ namespace WorldTerrain
     {
         Terrain,
         Height,
-        Plates
+        Plates,
+
+        /// <summary>RGBA 地表数据图（R=高度、G=水体、B=气温、A=湿度）。步骤 1 数据契约。</summary>
+        Surface,
+
+        /// <summary>RGBA 细节图（R/G=法线 XY、B=AO、A=粗糙度）。步骤 1 数据契约。</summary>
+        Detail
     }
 
     /// <summary>
@@ -63,10 +69,13 @@ namespace WorldTerrain
             if (w <= 0 || h <= 0)
                 return null;
 
-            bool linear = layer == MapLayer.Height;
+            // 高度图与两张数据图都是「物理量编码」，必须建 linear 贴图，
+            // 否则着色器采样时会被当成 sRGB 做一次 gamma 转换，数值就全变了。
+            bool linear = IsDataLayer(layer);
             var tex = new Texture2D(w, h, TextureFormat.RGBA32, false, linear);
 
-            float reliefScale = layer == MapLayer.Terrain
+            // 彩色地形图与细节图都按「陆地梯度 95 分位」归一化起伏
+            float reliefScale = NeedsReliefScale(layer)
                 ? TerrainMapRenderer.ComputeReliefScale(w, h, ctx.HeightField)
                 : 1f;
 
@@ -111,7 +120,7 @@ namespace WorldTerrain
                 return false;
 
             int w = ctx.Width, h = ctx.Height;
-            float reliefScale = layer == MapLayer.Terrain
+            float reliefScale = NeedsReliefScale(layer)
                 ? TerrainMapRenderer.ComputeReliefScale(w, h, ctx.HeightField)
                 : 1f;
 
@@ -178,12 +187,34 @@ namespace WorldTerrain
                         ctx.Width, ctx.Height, ctx.PlateIds, true, y0, y1, dest, destOffset);
                     break;
 
+                case MapLayer.Surface:
+                    SurfaceDataLayers.RenderSurfaceRows(ctx, y0, y1, dest, destOffset);
+                    break;
+
+                case MapLayer.Detail:
+                    SurfaceDataLayers.RenderDetailRows(ctx, reliefScale, y0, y1, dest, destOffset);
+                    break;
+
                 default:
                     TerrainMapRenderer.RenderTerrainRows(
                         ctx.Width, ctx.Height, ctx.HeightField, ctx.TerrainTypes,
                         ctx.Hydrology, ctx.Noise, reliefScale, y0, y1, dest, destOffset);
                     break;
             }
+        }
+
+        /// <summary>是否为「物理量编码」的数据图层（需要 linear 贴图）。</summary>
+        private static bool IsDataLayer(MapLayer layer)
+        {
+            return layer == MapLayer.Height
+                || layer == MapLayer.Surface
+                || layer == MapLayer.Detail;
+        }
+
+        /// <summary>哪些层的起伏要按 95 分位梯度归一化。</summary>
+        private static bool NeedsReliefScale(MapLayer layer)
+        {
+            return layer == MapLayer.Terrain || layer == MapLayer.Detail;
         }
     }
 
@@ -200,11 +231,19 @@ namespace WorldTerrain
         /// <summary>写人文 JSON（聚落 / 国家 / 交通 / 地名）。</summary>
         public bool human;
 
+        /// <summary>写 RGBA 地表数据图（高度 / 水体 / 气温 / 湿度）。步骤 1 数据契约。</summary>
+        public bool surface;
+
+        /// <summary>写 RGBA 细节图（法线 / AO / 粗糙度）。步骤 1 数据契约。</summary>
+        public bool detail;
+
         public static MapExportOptions All => new MapExportOptions
         {
             height = true,
             plates = true,
-            human = true
+            human = true,
+            surface = true,
+            detail = true
         };
     }
 }

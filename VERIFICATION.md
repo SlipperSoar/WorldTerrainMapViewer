@@ -1379,6 +1379,132 @@ DecodeTexture 会翻转一次（LoadImage 把文件末行放到第 0 行）；�
 
 ---
 
+## 19. 数据契约（V3.1.0，行星渲染步骤 1）
+
+行星渲染改造的**第一步：只定数据、不动渲染**。新增两张 RGBA8 数据贴图与
+_meta.json 里的渲染参数，供步骤 2/3/4 的着色器采样。生成语义完全不变，
+因此第 3.1 节的 11 个 dump 指纹**逐位不变**（已实测比对，见下）。
+
+### 19.1 两张数据图
+
+文件布局（在 MapStore.Paths 中）：`<名字>_surface.png` / `<名字>_detail.png`，
+与可见三图一样由 `PngStreamWriter` 按行带流式写出，**上北下南（第一行 = 北极）**、
+RGBA8 / 无交错 / 线性（非 sRGB，见 `MapExporter.IsDataLayer`）。
+
+| 文件 | 通道 | 物理含义 | 编码 → 解码 |
+|---|---|---|---|
+| `_surface.png` | R | 高度（米） | `R/255` → `[-10000, 10000]`，与灰度高度图同范围 |
+| | G | 水体硬掩膜 | `255` = 水（含海/湖/河/冰），`0` = 陆 |
+| | B | 气温（℃，最热月平均，随海拔递减） | `B/255` → `[-40, 40]` |
+| | A | 湿度 | `A/255` → `[0, 1]`，直接取 `TerrainContext.Moisture` |
+| `_detail.png` | R/G | 切线空间法线 XY | `xy = c/255*2-1`，`z = sqrt(1 - x² - y²)` 在着色器重建 |
+| | B | AO | `B/255` → `[0, 1]`，坡度越大越暗 |
+| | A | 粗糙度 | `A/255` → `[0, 1]`，由地形类型 + 湿度估计 |
+
+常量与量化函数集中在 `SurfaceContract`（`WorldGenData.cs`），按行带渲染在
+`SurfaceDataLayers.cs`。两张图**只读取生成结果**，不修改 `TerrainContext` 的任何字段；
+法线梯度用与彩色地形图相同的 `ComputeReliefScale`（陆地梯度 95 分位）归一化。
+
+> 这两张图是给着色器采样的数据，不是给人看的图：`MapPublisher.ExportFull` 用
+> `MapExporter.WritePng` 只写文件、不建 `Texture2D`（避免白占一张 RGBA32 显存）。
+
+### 19.2 _meta.json 渲染参数（version 3）
+
+`MapMetaData` 版本从 2 升到 **3**，新增 6 个字段（老地图缺字段时由
+`GetRenderParams()` 按 `version < 3` 兜底为缺省值，不影响老地图载入）：
+
+| 字段 | 含义 | 取值 |
+|---|---|---|
+| `seaLevelMeters` | 海平面（米） | 恒为 `0` —— 海平面标定步骤已把高度场平移到海平面 = 0 |
+| `snowLineEquatorMeters` / `snowLineMidMeters` / `snowLinePoleMeters` | 赤道/45°/85° 雪线（米） | `PolarClimate.ScaledSnowLineRange` 湿润侧下限，按本地图最高陆地海拔标定 |
+| `tideAmplitudeMeters` / `tidePeriodDays` | 潮汐振幅（米）/ 周期（地球日） | 缺省 `2` m / `0.5` d，步骤 4 简化潮汐用 |
+
+这些值由 `SurfaceDataLayers.ComputeRenderParams(heightField, axialTilt)` 纯函数算出，
+只依赖高度场与倾角 —— **同一配方两次生成必然得到同一组值**。
+
+### 19.3 导出开关与兼容性
+
+- `MapExportOptions` 新增 `surface` / `detail` 两个开关，`All` 默认全开；
+  UI 的三项勾选（高度/板块/人文）不覆盖这两项，始终随整包导出（步骤 2 依赖）。
+- `SaveRecipe`（生成时）仍只写 `_meta.json`，不写任何 PNG；两张数据图只在用户点
+  「导出当前地图」时随 `ExportFull` 落盘。
+- `MapStore.Load` 把两张数据图读进 `MapData.surfacePng` / `detailPng`，
+  渲染参数投到 `MapData` 的同名字段；`hasRecipe` 的「只有配方」分支同样带渲染参数。
+
+### 19.4 验证（步骤 1 实测）
+
+| 项 | 结果 |
+|---|---|
+| 离线编译门 gate | 0 错误（新增 `SurfaceDataLayers.cs` 已加入 gate.csproj） |
+| icecheck 11 个 dump SHA-256 | 与 §3.1 基线**逐位一致**（生成语义未变） |
+| Unity `WindowsBuild.CheckCompile` | `COMPILE_OK`，0 个 CS 错误 |
+| `GenerationProbe` | 5 层 PNG 落盘、七件套齐全、meta 渲染参数自检、配方逐位一致（见探针日志） |
+| PNG 外部解码 | CRC / 方向 / RGBA 通道范围校验（见 19.5） |
+
+### 19.5 PNG 外部解码校验
+
+探针导出的 5 张 PNG 用 `dsh_preview/icecheck/tools/check_surface_png.py`
+（Python PIL / zlib，不引用项目代码）独立解码，全部通过：
+
+- 每张 PNG 签名正确、chunk 顺序为 IHDR…IEND、**所有 chunk CRC-32 与 zlib adler32 正确**；
+- IHDR：4096×2048、bit depth 8、color type 6（RGBA）、非交错、所有扫描线 filter = 0；
+- 方向：第一行 = 北极 —— 地表图北极行气温 B 均值 **75.0** < 赤道行 **205.3**；
+- 数据契约通道（min / max / 取值数 / 均值，4096×2048 实测）：
+
+  | 通道 | min | max | 取值数 | 均值 | 说明 |
+  |---|---|---|---|---|---|
+  | surface.R | 62 | 171 | 110 | 115.3 | 高度编码 |
+  | surface.G | 0 | 255 | **2** | 204.2 | 水体硬掩膜，仅 {0, 255} |
+  | surface.B | 74 | 217 | 144 | 162.7 | 气温编码 |
+  | surface.A | 0 | 255 | 256 | 155.6 | 湿度，遍布 0-255 |
+  | detail.R | 2 | 254 | 253 | **127.5** | 法线 X，围绕中性 128 |
+  | detail.G | 2 | 253 | 252 | **127.7** | 法线 Y，围绕中性 128 |
+  | detail.B | 137 | 255 | 119 | 223.4 | AO |
+  | detail.A | 20 | 229 | 24 | 73.4 | 粗糙度（离散类型值） |
+
+### 19.6 像着色器一样采样（外部工具）
+
+运行时查看器**目前还不加载这两张图**（加载与采样是步骤 2 的活）；步骤 1 验收用
+`dsh_preview/icecheck/tools/sample_surface.py` 在 Unity 之外把 PNG 反解成物理量，
+做着色器将要做的事。解码公式与 `SurfaceContract` 一一对应（`c/255` 线性还原，
+法线 `xy = c/255*2-1`、`z = sqrt(1-x²-y²)` 重建）：
+
+```
+python sample_surface.py                 # 自动取 StreamingAssets 里最新一套导出
+python sample_surface.py <baseName>      # 指定地图名
+python sample_surface.py --probe         # 采样 temp/wtmv_probe 的 4096 探针图
+python sample_surface.py --preview       # 额外输出 8 张通道灰度预览图
+```
+
+脚本断言：各通道物理量范围、水体掩膜二值性、重建法线长度 ≈ 1、与气候公式
+/`_meta.json` 交叉验证（赤道气温、南北温差、水体占比、雪线单调下降、
+meta 六项渲染参数齐全）、按 `(u,v)` 逐点打印采样值。
+
+在一张真实导出图（2048×1024，seed 142542985，水面 0.659）上实测全部通过：
+高度 `[−4902, 3490] m`、气温 `[−16.5, 28.1] ℃`、湿度 `[0,1]`、
+赤道陆地气温中位 `22.9 ℃`（公式海平面 `28.0 ℃`）、北极 `−16.5 ℃ < 赤道 25.7 ℃`、
+雪线 `1740 ≥ 725 ≥ 0 m`、法线长度均值 `1.0000`。
+
+> **重要前提**：数据图必须按 **linear / 不压缩 / 无 mipmap** 采样。
+> 目前 PNG 落在 `StreamingAssets`，Unity 自动生成的 `.meta` 是 `DefaultImporter`
+> （默认 sRGB + 压缩），直接 `tex2D` 会读到被 gamma 与压缩污染的值。
+> 步骤 2 接入时要么改导入设置（`TextureImporter`：`sRGBTexture=false`、
+> `textureCompression=Uncompressed`、`mipmapEnabled=false`），要么运行时用
+> `Texture2D(..., linear:true)` + `LoadRawTextureData` 从字节自行解码。
+> 这一步的产物是**磁盘上的数据 + 明确的解码公式**，运行时接入留给步骤 2。
+
+### 19.7 收尾修复：地图列表过滤
+
+`UIController.LoadImagesFromStreamingAssets` 原本只排除 `_height` / `_plates` /
+`_lines` 三种配套图，新增的两张数据图会被当成**独立地图**列进列表。
+改为按「去扩展名后的 basename 精确后缀」判断，一次列全 5 种配套图
+（`_height` / `_plates` / `_surface` / `_detail` / `_lines`），
+顺带避免 `Contains` 把名字里带这些子串的地图本体误杀。
+`dsh_preview/icecheck/tools/check_maplist_filter.py` 对真实导出目录复刻该判断，
+确认列表只剩地图本体 1 项。
+
+---
+
 ## 附：不当作基线的历史数值
 
 以下数值出现在早期记录里，因为算法改动而**不再有效**，列出仅供追溯：

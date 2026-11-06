@@ -10,7 +10,7 @@ namespace WorldTerrain
     /// - <see cref="SaveRecipe"/>：生成完只写 <c>_meta.json</c>（含整型配方）。
     ///   地图列表靠它列出条目；首次选中时按配方重建（生成是确定性的）。
     /// - <see cref="ExportFull"/>：用户点「导出」时才写全套 ——
-    ///   地形图 / 高度图 / 板块图 / 人文 JSON / meta。
+    ///   地形图 / 高度图 / 板块图 / 地表数据图 / 细节图 / 人文 JSON / meta。
     ///
     /// 拆开的理由：生成一张 8192 地图要写三张几十 MB 的 PNG，
     /// 而多数时候用户只是要看一眼；配方 JSON 只有几百字节。
@@ -36,7 +36,7 @@ namespace WorldTerrain
             }
         }
 
-        /// <summary>导出整包（三张 PNG + 人文 + meta）。用户显式触发。</summary>
+        /// <summary>导出整包（五张 PNG + 人文 + meta）。用户显式触发。</summary>
         public static bool ExportFull(TerrainContext ctx, MapRecipe recipe, string baseName,
             MapExportOptions options, string generatedAt = null)
         {
@@ -67,6 +67,14 @@ namespace WorldTerrain
                     if (t != null) UnityEngine.Object.Destroy(t);
                 }
 
+                // 步骤 1 数据契约：两张 RGBA 数据图。只写 PNG，不建可显示贴图 ——
+                // 它们是给着色器采样的数据，不是给人看的图，建了也只会白占一张 RGBA32。
+                if (options.surface)
+                    MapExporter.WritePng(ctx, MapLayer.Surface, paths.surface);
+
+                if (options.detail)
+                    MapExporter.WritePng(ctx, MapLayer.Detail, paths.detail);
+
                 if (options.human && ctx.Human != null)
                     HumanGeographyData.Save(baseName, ctx.Human);
 
@@ -83,9 +91,9 @@ namespace WorldTerrain
         /// <summary>组装 meta（配方 + 展示属性）。</summary>
         private static MapMetaData BuildMeta(TerrainContext ctx, MapRecipe recipe, string generatedAt)
         {
-            return new MapMetaData
+            var meta = new MapMetaData
             {
-                version = 2,
+                version = 3,      // 3.1 起带渲染参数（海平面 / 雪线 / 潮汐）
                 axialTilt = recipe.AxialTilt,
                 waterCoverage = recipe.WaterCoverage,
                 seed = recipe.seed,
@@ -103,6 +111,10 @@ namespace WorldTerrain
                     : generatedAt,
                 human = HumanMapSummary.From(ctx.Human)
             };
+
+            // 渲染参数由「高度场 + 倾角」确定，同一配方两次生成必然一致。
+            meta.SetRenderParams(SurfaceDataLayers.ComputeRenderParams(ctx));
+            return meta;
         }
     }
 }

@@ -1109,11 +1109,20 @@ public class UIController : MonoBehaviour
                 extension != ".tiff")
                 continue;
 
-            // 配套文件不算地图本体
-            if (name.Contains("_height") || name.Contains("_plates") || name.Contains("_lines"))
+            // 配套文件不算地图本体。判断放在**去扩展名后的 basename** 上：
+            //   - 用 EndsWith 而非 Contains，避免地图名里带 "_surface" 之类子串时误杀本体；
+            //   - 不看扩展名，老地图若用 jpg/tga 存配套图同样能排除。
+            // 3.1 起新增两张数据图（_surface / _detail），必须一起排除，
+            // 否则它们会被当成两张独立地图列进列表。
+            string stem = Path.GetFileNameWithoutExtension(name);
+            if (stem.EndsWith("_height", StringComparison.OrdinalIgnoreCase) ||
+                stem.EndsWith("_plates", StringComparison.OrdinalIgnoreCase) ||
+                stem.EndsWith("_surface", StringComparison.OrdinalIgnoreCase) ||
+                stem.EndsWith("_detail", StringComparison.OrdinalIgnoreCase) ||
+                stem.EndsWith("_lines", StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            pngBases.Add(Path.GetFileNameWithoutExtension(name));
+            pngBases.Add(stem);
         }
 
         var entries = new List<string>();
@@ -1689,12 +1698,16 @@ public class UIController : MonoBehaviour
             WorldTerrainGenerator.Instance.onProgress = OnGenerationProgress;
             WorldTerrainGenerator.Instance.onComplete = OnGenerationComplete;
             WorldTerrainGenerator.Instance.onError = OnGenerationError;
-            // 导出开关：地形图始终写（否则地图列表里加载不回来），其余三项按勾选
+            // 导出开关：地形图始终写（否则地图列表里加载不回来），其余按勾选。
+            // surface / detail 是步骤 1 的数据契约图层（步骤 2 的法线与独立水面 pass 依赖），
+            // 不设 UI 开关、始终随整包导出，与 MapExportOptions.All 保持一致。
             WorldTerrainGenerator.Instance.ExportOptions = new MapExportOptions
             {
                 height = _exportHeightToggle == null || _exportHeightToggle.value,
                 plates = _exportPlatesToggle == null || _exportPlatesToggle.value,
-                human = _exportHumanToggle == null || _exportHumanToggle.value
+                human = _exportHumanToggle == null || _exportHumanToggle.value,
+                surface = true,
+                detail = true
             };
 
             // 把两个图层的开关状态一起带过去，否则生成后会被重新点亮

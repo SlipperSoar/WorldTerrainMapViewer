@@ -14,6 +14,14 @@ public class EarthManager : MonoBehaviour
     [SerializeField] private GameObject markerPrefab;
     [SerializeField] private Transform markersParent;
     [SerializeField, Range(0f, 0.3f)] private float heightScale = 0.15f;
+
+    [Header("步骤 2：水面 / 法线 / 潮汐")]
+    [SerializeField, Tooltip("多少个真实秒对应一个『地球日』；潮汐周期以天为单位，30 秒/天时半日潮约 15 秒涨落一次")]
+    private float tideSecondsPerDay = 30f;
+    [SerializeField, Range(0f, 1f)] private float waterSurfaceOn = 1f;
+    [SerializeField, Range(0f, 1f)] private float normalOn = 1f;
+    [SerializeField, Range(0f, 2f)] private float foamStrength = 0.8f;
+    [SerializeField, Range(0f, 2f)] private float waterSpecular = 1.2f;
     [SerializeField] private float labelMaxDisplayDistance = 20f;
     [SerializeField] private float labelBaseCharSize = 0.08f;
     [SerializeField] private float labelReferenceDistance = 5f;
@@ -125,6 +133,22 @@ public class EarthManager : MonoBehaviour
         HandleColorSelection();
         UpdateMarkerLabels();
         UpdateHumanLabels();
+        UpdateTide();
+    }
+
+    /// <summary>
+    /// 每帧把「累计天数」写进地表材质的 _TideTime，驱动潮汐海平面升降。
+    /// 顶点位移按静态水体掩膜钳平（几何不抖动），只有 frag 里的水色/海岸线
+    /// 随潮位吞吐，所以这里只改一个 float uniform，开销可忽略。
+    /// </summary>
+    private void UpdateTide()
+    {
+        if (earthRenderer == null)
+            return;
+
+        float secondsPerDay = tideSecondsPerDay > 0.01f ? tideSecondsPerDay : 30f;
+        float tideDays = Time.time / secondsPerDay;
+        earthRenderer.material.SetFloat("_TideTime", tideDays);
     }
 
     #endregion
@@ -403,6 +427,13 @@ public class EarthManager : MonoBehaviour
         material.SetFloat("_SnowLinePole", p.snowLinePoleMeters);
         material.SetFloat("_TideAmplitude", p.tideAmplitudeMeters);
         material.SetFloat("_TidePeriod", p.tidePeriodDays);
+
+        // 步骤 2 开关：没有数据图（导入的单张 PNG）时关掉水面着色与法线贴图，
+        // 让彩图保持原样；有数据图时按 Inspector 配置。
+        material.SetFloat("_WaterSurfaceOn", hasData ? waterSurfaceOn : 0f);
+        material.SetFloat("_NormalOn", hasData ? normalOn : 0f);
+        material.SetFloat("_FoamStrength", foamStrength);
+        material.SetFloat("_WaterSpecular", waterSpecular);
 
         ReplaceOwnedTexture(ref _surfaceDataTexture, surface);
         ReplaceOwnedTexture(ref _detailTexture, detail);

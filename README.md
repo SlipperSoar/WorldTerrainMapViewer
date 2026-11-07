@@ -156,13 +156,18 @@ GenerationPipeline.CreateDefault()         ← 有序步骤表
 | `<名字>_detail.png` | 法线 X | 法线 Y | AO | 粗糙度 |
 
 V3.2 起 G 通道不再只是 0/255 掩膜，而是 `WaterClass` 的间隔编码（`值 = 类别×16`），
-供步骤 2 的独立水面 pass 区分河 / 湖 / 海 / 冰；解码公式见
+供水面着色区分河 / 湖 / 海 / 冰；解码公式见
 [VERIFICATION.md 第 20 节](VERIFICATION.md#20-v320g-通道分类--运行时接入--fresnel--砍老地图)。
 
 两张图与可见三图一样**上北下南**（第一行 = 北极）、由 `PngStreamWriter` 流式写出、
 线性非 sRGB。`_meta.json`（version 3）同时补上**海平面 / 赤道·中纬·极地雪线 /
-潮汐振幅·周期**六项渲染参数，供后续步骤的着色器换算海面、雪线与潮位。
-老地图缺这些字段时按缺省值兜底，载入不受影响。
+潮汐振幅·周期**六项渲染参数。V3.2 起只接受带配方的有效 meta，无配方老地图不再载入。
+
+**这些数据的消费（V3.3 起）**：地表 shader 通过 `SurfaceShading.cginc` 采样两张数据图——
+G 分类做独立水面着色（水面钳平到海平面、深度只用颜色区分）、R 反推水深、
+`_detail` 做法线贴图 / AO / 粗糙度、潮汐参数驱动海平面升降与动态海岸线。
+导入的单张 PNG 没有数据图时自动退回原样。详见
+[VERIFICATION.md 第 21 节](VERIFICATION.md#21-v330独立水面--法线贴图--潮汐步骤-2-剩余增量)。
 
 编码常量在 `SurfaceContract`，解码公式与外部解码校验见
 [VERIFICATION.md 第 19 节](VERIFICATION.md#19-数据契约v310行星渲染步骤-1)。

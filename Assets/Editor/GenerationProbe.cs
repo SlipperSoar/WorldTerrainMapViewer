@@ -152,20 +152,31 @@ public static class GenerationProbe
 
             Color32[] px = tex.GetPixels32();
             int stride = SurfaceContract.WaterClassStride;
+            int maxCls = (int)WaterClass.SnowPeak;
             bool allValid = true, hasLand = false, hasWater = false;
+            var seen = new bool[maxCls + 1];
             foreach (Color32 c in px)
             {
                 int g = c.g;
-                if (g % stride != 0 || g > (int)WaterClass.SnowPeak * stride)
+                if (g % stride != 0 || g > maxCls * stride)
                 {
                     allValid = false;
                     break;
                 }
-                if (g == 0) hasLand = true; else hasWater = true;
+                int cls = g / stride;
+                seen[cls] = true;
+                if (cls == 0) hasLand = true; else hasWater = true;
             }
             UnityEngine.Object.DestroyImmediate(tex);
+
+            // 步骤 2 水面着色依赖：至少要有陆地、海、浅海三类能区分
+            bool shadingReady = allValid && hasLand && hasWater &&
+                                seen[(int)WaterClass.Ocean] && seen[(int)WaterClass.ShallowOcean];
+            int seenCount = 0;
+            foreach (bool s in seen) if (s) seenCount++;
             Debug.Log($"[probe] G 通道水体分类：合法={allValid} 含陆地={hasLand} 含水/冰={hasWater} " +
-                      $"(stride={stride}, 类别数={(int)WaterClass.SnowPeak + 1})");
+                      $"出现类别数={seenCount}/{maxCls + 1} 水面着色就绪={shadingReady} " +
+                      $"(stride={stride})");
         }
 
         /// <summary>验证 V3.2 起无配方 / 旧版 meta 不再被当作地图载入。</summary>

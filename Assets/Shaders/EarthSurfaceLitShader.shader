@@ -18,6 +18,11 @@ Shader "Custom/EarthSurfaceLitShader"
         _SnowLinePole ("Snow Line Pole (m)", Float) = 0
         _TideAmplitude ("Tide Amplitude (m)", Float) = 2
         _TidePeriod ("Tide Period (days)", Float) = 0.5
+        _TideTime ("Tide Time (days)", Float) = 0
+        _WaterSurfaceOn ("Water Surface Shading", Range(0, 1)) = 1
+        _NormalOn ("Detail Normal", Range(0, 1)) = 1
+        _FoamStrength ("Foam Strength", Range(0, 2)) = 0.8
+        _WaterSpecular ("Water Specular", Range(0, 2)) = 1.2
     }
 
     // 注：Fresnel 边缘辉光已移到独立的 Custom/AtmosphereGlowShader 球壳
@@ -65,20 +70,15 @@ Shader "Custom/EarthSurfaceLitShader"
 
             sampler2D _MainTex;
             float4 _MainTex_ST;
-            sampler2D _HeightTex;
-            float4 _HeightTex_TexelSize;
             float _HeightScale;
             fixed4 _Color;
             fixed4 _Specular;
             float _Glossiness;
 
-            // ── 步骤 2.0：数据契约贴图 + 渲染参数 ──
-            // 地表 shader 暂时只接收这些 uniform，实际消费在步骤 2 后续的独立水面 pass /
-            // 法线贴图里。Fresnel 辉光已移到独立球壳，不在这里计算。
-            sampler2D _SurfaceTex;
-            sampler2D _DetailTex;
-            float _SeaLevel, _SnowLineEquator, _SnowLineMid, _SnowLinePole;
-            float _TideAmplitude, _TidePeriod;
+            // 步骤 2：水面着色 / 法线 / 潮汐的共享函数与数据图 uniform 都在这里。
+            // cginc 自己声明 _SurfaceTex / _DetailTex / _HeightTex 及渲染参数，
+            // 所以本 pass 不再重复声明，避免重复定义。
+            #include "SurfaceShading.cginc"
 
             float2 EquirectangularUV(float3 localPos)
             {
@@ -100,7 +100,9 @@ Shader "Custom/EarthSurfaceLitShader"
 
             float GetDisplacedHeight(float2 uv)
             {
-                return tex2Dlod(_HeightTex, float4(uv, 0, 0)).r * 2.0 - 1.0;
+                // 水面像素钳到海平面 → 返回 0（水平），陆地用原始高度。
+                // SurfaceDisplacementR 返回 0..1 的高度图编码值，映射回 [-1,1]。
+                return SurfaceDisplacementR(uv) * 2.0 - 1.0;
             }
 
             v2f vert (appdata v)
@@ -151,26 +153,70 @@ Shader "Custom/EarthSurfaceLitShader"
 
             fixed4 frag (v2f i) : SV_Target
             {
-                // Compute equirectangular UV per-pixel from the interpolated
-                // local position. This avoids the vertex-level UV interpolation
-                // artifact at the longitude seam where triangles would otherwise
-                // stretch across the entire texture width.
-                float2 finalUV = EquirectangularUV(i.localPos);
-                finalUV = TRANSFORM_TEX(finalUV, _MainTex);
+                // 数据图用**原始等距圆柱 UV**（不套 _MainTex 的 TRANSFORM_TEX）：
+                // 数据图与彩色图始终逐像素对齐，tiling/offset 只影响可见彩色图。
+                float2 dataUV = EquirectangularUV(i.localPos);
+                float2 finalUV = TRANSFORM_TEX(dataUV, _MainTex);
                 fixed4 texColor = tex2D(_MainTex, finalUV);
                 fixed4 col = texColor * _Color;
-                
+
                 float3 normal = normalize(i.worldNormal);
                 float3 lightDir = normalize(_WorldSpaceLightPos0.xyz);
                 float3 viewDir = normalize(_WorldSpaceCameraPos - i.worldPos);
-                
+
+                float ao = 1.0;
+                float roughness = _Glossiness;
+                bool isWater = false;
+
+#if defined(_SURFACE_DATA_ON)
+                fixed4 surf = tex2D(_SurfaceTex, dataUV);
+                float heightMeters = DecodeHeightMeters(surf.r);
+                isWater = HasWater(surf.g);
+
+                // 潮汐动态海岸线：涨潮时把「低于当前海平面的邻近陆地」也染成水，
+                // 顶点位移仍按静态掩膜钳平，几何不抖动，只有颜色随潮位吞吐。
+                if (!isWater && _WaterSurfaceOn > 0.5)
+                    isWater = heightMeters < SeaLevelMeters();
+
+                if (isWater && _WaterSurfaceOn > 0.5)
+                {
+                    // 水面是**水平面**：不套 _detail 的法线 / AO / 粗糙度。
+                    // _detail 的法线来自高度场梯度，海洋格是海底负值，贴到水平
+                    // 海面上会变成错误的波纹。深度只用颜色区分即可。
+                    // 因此这里保持 normal 为球体法线、ao=1、roughness 用缺省值。
+                    float foam = 0.0;
+                    float3 waterCol = WaterColor(surf.g, heightMeters, foam);
+                    col.rgb = lerp(col.rgb, waterCol, 0.92);
+                    col.rgb = lerp(col.rgb, float3(0.92, 0.96, 1.0),
+                                   saturate(foam * _FoamStrength));
+                }
+                else
+                {
+                    // 陆地才用法线贴图：球面 TBN 扰动 + AO + 粗糙度
+                    fixed4 detail = tex2D(_DetailTex, dataUV);
+                    normal = PerturbWorldNormal(normal, i.worldPos, dataUV, detail.rgb);
+                    ao = detail.b;
+                    roughness = saturate(1.0 - detail.a);
+                }
+#endif
+
                 float NdotL = max(0, dot(normal, lightDir));
-                
                 float3 halfDir = normalize(lightDir + viewDir);
                 float NdotH = max(0, dot(normal, halfDir));
-                float specular = pow(NdotH, _Glossiness * 100) * _Specular.rgb;
-                
-                fixed3 ambient = UNITY_LIGHTMODEL_AMBIENT.rgb * col.rgb;
+
+                // 水面高光更强、更锐；陆地沿用材质 _Specular/_Glossiness
+                float specPower = _Glossiness * 100.0;
+                float3 specColor = _Specular.rgb;
+#if defined(_SURFACE_DATA_ON)
+                if (isWater && _WaterSurfaceOn > 0.5)
+                {
+                    specPower = lerp(60.0, 220.0, saturate(roughness));
+                    specColor *= _WaterSpecular;
+                }
+#endif
+                float3 specular = pow(NdotH, specPower) * specColor;
+
+                fixed3 ambient = UNITY_LIGHTMODEL_AMBIENT.rgb * col.rgb * ao;
                 fixed3 diffuse = col.rgb * _LightColor0.rgb * NdotL;
                 fixed3 spec = specular * _LightColor0.rgb;
 
@@ -196,8 +242,8 @@ Shader "Custom/EarthSurfaceLitShader"
             #pragma multi_compile_fwdadd
             #pragma multi_compile_fog
             #pragma multi_compile _ _TERRAIN_DISPLACEMENT_ON
-            // 与 ForwardBase 保持一致的 local keyword 集合；本 pass 不采样数据图，
-            // 也不加辉光（Blend One One 叠加，重复加会双倍）。声明只为变体匹配一致。
+            // 与 ForwardBase 保持一致的 local keyword 集合。ForwardAdd 同样要采样数据图
+            // 做水面/法线，否则多光源下水陆光照会不一致；但它是叠加 pass，不加辉光/泡沫。
             #pragma multi_compile_local _ _SURFACE_DATA_ON
 
             #include "UnityCG.cginc"
@@ -224,12 +270,13 @@ Shader "Custom/EarthSurfaceLitShader"
 
             sampler2D _MainTex;
             float4 _MainTex_ST;
-            sampler2D _HeightTex;
-            float4 _HeightTex_TexelSize;
             float _HeightScale;
             fixed4 _Color;
             fixed4 _Specular;
             float _Glossiness;
+
+            // 与 ForwardBase 共用同一份水面/法线/潮汐逻辑与数据图 uniform
+            #include "SurfaceShading.cginc"
 
             float2 EquirectangularUV(float3 localPos)
             {
@@ -251,7 +298,9 @@ Shader "Custom/EarthSurfaceLitShader"
 
             float GetDisplacedHeight(float2 uv)
             {
-                return tex2Dlod(_HeightTex, float4(uv, 0, 0)).r * 2.0 - 1.0;
+                // 水面像素钳到海平面 → 返回 0（水平），陆地用原始高度。
+                // SurfaceDisplacementR 返回 0..1 的高度图编码值，映射回 [-1,1]。
+                return SurfaceDisplacementR(uv) * 2.0 - 1.0;
             }
 
             v2f vert (appdata v)
@@ -302,34 +351,56 @@ Shader "Custom/EarthSurfaceLitShader"
 
             fixed4 frag (v2f i) : SV_Target
             {
-                float2 finalUV = EquirectangularUV(i.localPos);
-                finalUV = TRANSFORM_TEX(finalUV, _MainTex);
+                float2 dataUV = EquirectangularUV(i.localPos);
+                float2 finalUV = TRANSFORM_TEX(dataUV, _MainTex);
                 fixed4 texColor = tex2D(_MainTex, finalUV);
                 fixed4 col = texColor * _Color;
-                
+
                 float3 normal = normalize(i.worldNormal);
-                
+                float ao = 1.0;
+
+#if defined(_SURFACE_DATA_ON)
+                fixed4 surf = tex2D(_SurfaceTex, dataUV);
+                // 与 ForwardBase 用同一套水色（不含泡沫：叠加 pass 里泡沫会双倍发白）。
+                // 潮汐动态海岸线同样在这里生效，保证附加光也照到涨潮淹没的浅滩。
+                float heightMeters = DecodeHeightMeters(surf.r);
+                bool isWater = HasWater(surf.g);
+                if (!isWater && _WaterSurfaceOn > 0.5)
+                    isWater = heightMeters < SeaLevelMeters();
+                if (isWater && _WaterSurfaceOn > 0.5)
+                {
+                    // 水面水平：不套 _detail 法线/AO，只用颜色区分深度
+                    float foam = 0.0;
+                    float3 waterCol = WaterColor(surf.g, heightMeters, foam);
+                    col.rgb = lerp(col.rgb, waterCol, 0.92);
+                }
+                else
+                {
+                    fixed4 detail = tex2D(_DetailTex, dataUV);
+                    normal = PerturbWorldNormal(normal, i.worldPos, dataUV, detail.rgb);
+                    ao = detail.b;
+                }
+#endif
+
                 #ifdef USING_DIRECTIONAL_LIGHT
                     float3 lightDir = normalize(_WorldSpaceLightPos0.xyz);
                 #else
                     float3 lightDir = normalize(_WorldSpaceLightPos0.xyz - i.worldPos * _WorldSpaceLightPos0.w);
                 #endif
-                
+
                 float3 viewDir = normalize(_WorldSpaceCameraPos - i.worldPos);
-                
                 float NdotL = max(0, dot(normal, lightDir));
-                
                 float3 halfDir = normalize(lightDir + viewDir);
                 float NdotH = max(0, dot(normal, halfDir));
-                float specular = pow(NdotH, _Glossiness * 100) * _Specular.rgb;
-                
-                fixed3 diffuse = col.rgb * _LightColor0.rgb * NdotL;
+                float3 specular = pow(NdotH, _Glossiness * 100) * _Specular.rgb;
+
+                fixed3 diffuse = col.rgb * _LightColor0.rgb * NdotL * ao;
                 fixed3 spec = specular * _LightColor0.rgb;
-                
+
                 fixed4 finalColor;
                 finalColor.rgb = diffuse + spec;
                 finalColor.a = col.a;
-                
+
                 UNITY_APPLY_FOG(i.fogCoord, finalColor);
                 return finalColor;
             }

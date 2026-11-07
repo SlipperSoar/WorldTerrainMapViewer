@@ -1687,6 +1687,77 @@ Properties、两个 pass 的 uniform/helper、ForwardBase frag 里的辉光计�
 
 ---
 
+## 21. V3.3.0：独立水面 / 法线贴图 / 潮汐（步骤 2 剩余增量）
+
+### 21.1 需求与关键决策
+
+- **水面应做到水平面高度**：此前开凹凸时，海洋按高度场的负值被**凹下去**，观感不好。
+  改为「水体像素的顶点位移钳到海平面（0）」，水面水平；深度**只用颜色区分**，不靠几何。
+- **一起做**：独立水面着色 + 法线贴图 + AO/粗糙度 + 潮汐，一个版本交付。
+- **潮汐顺带**：用已有 `_TideAmplitude/_TidePeriod` 驱动海平面升降。
+
+### 21.2 实现（不改生成语义、不改数据契约）
+
+新增 `Assets/Shaders/SurfaceShading.cginc`（两个 pass 共享，避免复制两份逻辑），
+`EarthSurfaceLitShader` 的 ForwardBase / ForwardAdd 都 `#include` 它：
+
+| 函数 | 作用 |
+|---|---|
+| `DecodeHeightMeters(r)` | `_surface.R` → 米 |
+| `WaterClassOf(g)` / `HasWater(g)` | G 间隔编码 → 类别 / 是否有水 |
+| `TideOffsetMeters()` / `SeaLevelMeters()` | `sin(_TideTime/_TidePeriod*2π)*振幅`，海平面 = 静态 + 潮汐 |
+| `SurfaceDisplacementR(uv)` | **水面钳平核心**：水体像素返回「海平面对应的编码值」而非原始负高度 |
+| `WaterColor(g, h, out foam)` | 按类别 + 深度（海平面−地形高度）做浅→深渐变；河/湖偏绿、冰偏白；近岸/潮汐带泡沫 |
+| `PerturbWorldNormal(...)` | `_detail.RG` 重建切线法线，球面解析 TBN（极点退化保护），AO/粗糙度参与光照 |
+
+**顶点位移改法**：`GetDisplacedHeight` 由直接读 `_HeightTex` 改为调用
+`SurfaceDisplacementR` → 水体返回 0（水平）、陆地保留凹凸。顶点阶段按**静态** G 掩膜
+判断，几何不随每帧潮汐抖动。
+
+**frag 改法**：
+- 数据图用**未经 `TRANSFORM_TEX` 的原始等距圆柱 UV**（与可见彩图逐像素对齐）
+- **先判水体，再分支**：`isWater = HasWater(g) || (陆地但 heightMeters < SeaLevelMeters())`
+- 陆地：法线扰动 + AO 进 ambient + 粗糙度控高光
+- 水面：`WaterColor` 覆盖 albedo（0.92 混合）+ 泡沫 + 更强更锐的高光，
+  **不套 `_detail` 的法线 / AO / 粗糙度**
+- **潮汐动态海岸线**：涨潮淹没邻近浅滩、退潮露出；只有颜色变，几何稳定
+- ForwardAdd 用同一套水色/法线（不含泡沫，避免叠加 pass 双倍发白），保证多光源一致
+
+> **实测反馈修正**：`_detail` 的法线来自高度场梯度，海洋格是海底负值，贴到
+> **水平海面**上会变成错误的波纹。首版把法线无条件套到所有像素，水面出现
+> 不该有的凹凸。改为「**法线贴图只用于陆地**」：水面保持球体法线（水平），
+> 深度只用颜色区分。两个 pass 都改；`PerturbWorldNormal` 注释里也写明只用于陆地。
+
+**无数据图兜底**：`SetSurfaceData` 在缺图时把 `_WaterSurfaceOn`/`_NormalOn` 置 0，
+导入的单张 PNG 保持原样。
+
+**潮汐时钟**：`EarthManager.Update` 每帧把 `Time.time / tideSecondsPerDay` 写进
+`_TideTime`（天）。默认 30 秒/天、半日潮 0.5 天 → 约 15 秒一次涨落，肉眼可见。
+
+### 21.3 对比图（离屏渲染）
+
+一次性 Editor 脚本 `RenderCompare`（用完已删）在**有图形设备**的 batchmode 下打开主场景，
+挂载最新一套导出地图，渲染两帧：
+- `before.png`：`_SURFACE_DATA_ON` 关 + 两个开关置 0（退回纯彩色图着色）
+- `after.png`：新水面 + 法线 + 潮汐全开
+
+拼成 `compare.png`（左改前 / 右改后）。像素校验：7.0% 像素明显变化，改后整体更偏蓝
+（B 35.9→39.0、G 21.5→25.5），符合水面着色预期。图随测试包交付。
+
+### 21.4 验证
+
+| 项 | 结果 |
+|---|---|
+| gate / icecheck 编译 | 0 错误 |
+| 11 个 dump SHA-256 | 与 §3.1 基线逐位一致（生成语义与数据契约都未变） |
+| Unity `CheckCompile` / 完整 Build | `COMPILE_OK` / `BUILD_OK`，shader compiler 12 次无 error |
+| 外部采样工具 | 新增「水体保留真实深度」「深海比浅海更深」「潮汐参数可用」断言，全部通过 |
+| `GenerationProbe` | 新增「水面着色就绪」（至少出现陆地/海/浅海三类） |
+| 对比图 | 改前/改后 7% 像素差异，见上 |
+| 视觉回归 | **仍需用户实测**（对比图不能替代） |
+
+---
+
 ## 附：不当作基线的历史数值
 
 以下数值出现在早期记录里，因为算法改动而**不再有效**，列出仅供追溯：

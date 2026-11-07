@@ -21,8 +21,8 @@ public static class WindowsBuild
     /// <summary>构建产物目录（相对仓库根），与历史产物位置保持一致。</summary>
     public const string DefaultOutputDir = "Build";
 
-    /// <summary>可执行文件名。</summary>
-    public const string ExeName = "WorldTerrainMapViewer.exe";
+    /// <summary>可执行文件名（产品名 PlanetTerrarium）。</summary>
+    public const string ExeName = "PlanetTerrarium.exe";
 
     /// <summary>环境变量：覆盖输出目录。</summary>
     public const string OutputDirEnvVar = "WTMV_BUILD_DIR";

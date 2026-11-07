@@ -660,7 +660,11 @@ Unity 的托管堆把内存还给 GC 之后**不会再把页还给操作系统**
 |---|---|
 | 标签 | `V<版本>`（如 `V2.2.0`） |
 | Release 标题 | `Release <yyyy.MM.dd> V<版本>` |
-| 资产名 | `WorldTerrainMapViewer.zip`（解压即为可直接运行的 Windows 程序） |
+| 资产名 | `PlanetTerrarium.zip`（解压即为可直接运行的 Windows 程序） |
+
+> 项目原名 `WorldTerrainMapViewer`，V3.3.0 之后更名为 **PlanetTerrarium**（GitHub 仓库
+> `SlipperSoar/PlanetTerrarium`）。旧版实测记录（如 VERIFICATION.md §16.5）里保留当时的
+> 旧产物名，属于历史，不代表当前命名。
 | 发布说明 | `release-notes/V<版本>.md`（UTF-8，随仓库保存） |
 
 脚本行为要点：

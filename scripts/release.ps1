@@ -16,7 +16,7 @@
       2. Bump ProjectSettings bundleVersion
       3. Compile check (WindowsBuild.CheckCompile) -- fail fast on script errors
       4. Build StandaloneWindows64 via Unity batchmode
-      5. Zip Build/ -> dist/WorldTerrainMapViewer.zip
+      5. Zip Build/ -> dist/PlanetTerrarium.zip
       6. git add -A + commit
       7. git tag V<Version>
       8. git push origin <branch> + tag
@@ -40,7 +40,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$NotesFile = "",
     [string]$Branch = "main",
-    [string]$Repo = "SlipperSoar/WorldTerrainMapViewer",
+    [string]$Repo = "SlipperSoar/PlanetTerrarium",
     [string]$EditorPath = "",
     [string]$Token = "",
     [switch]$SkipCommit,
@@ -61,8 +61,8 @@ $Tag       = if ($Version.StartsWith("V")) { $Version } else { "V$Version" }
 $PlainVer  = $Tag.TrimStart("V")
 $BuildDir  = Join-Path $RepoRoot "Build"
 $DistDir   = Join-Path $RepoRoot "dist"
-$ZipPath   = Join-Path $DistDir "WorldTerrainMapViewer.zip"
-$AssetName = "WorldTerrainMapViewer.zip"
+$ZipPath   = Join-Path $DistDir "PlanetTerrarium.zip"
+$AssetName = "PlanetTerrarium.zip"
 $ApiBase   = "https://api.github.com/repos/$Repo"
 
 function Step([string]$text) { Write-Host ""; Write-Host "=== $text ===" -ForegroundColor Cyan }
@@ -196,14 +196,14 @@ if (-not $SkipBuild) {
     }
 
     if ($proc.ExitCode -ne 0) { Fail "build failed (exit $($proc.ExitCode)); see $logPath" }
-    $exe = Join-Path $BuildDir "WorldTerrainMapViewer.exe"
+    $exe = Join-Path $BuildDir "PlanetTerrarium.exe"
     if (-not (Test-Path $exe)) { Fail "build reported success but $exe is missing" }
     Info "built: $exe"
 }
 
 # ---- 4. package -----------------------------------------------------------
 Step "Package"
-$exePath = Join-Path $BuildDir "WorldTerrainMapViewer.exe"
+$exePath = Join-Path $BuildDir "PlanetTerrarium.exe"
 if (-not (Test-Path $exePath)) { Fail "no build output in $BuildDir" }
 
 New-Item -ItemType Directory -Force -Path $DistDir | Out-Null

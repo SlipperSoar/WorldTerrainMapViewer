@@ -1758,6 +1758,30 @@ Properties、两个 pass 的 uniform/helper、ForwardBase frag 里的辉光计�
 
 ---
 
+## 22. 项目更名（V3.3.0 之后）
+
+仓库 / 产品从 `WorldTerrainMapViewer` 更名为 **PlanetTerrarium**
+（GitHub：`SlipperSoar/PlanetTerrarium`）。改动范围与验证：
+
+| 层 | 改动 |
+|---|---|
+| 远端仓库名 | 通过 GitHub API `PATCH /repos/SlipperSoar/WorldTerrainMapViewer` 改名；旧 URL 由 GitHub 自动 301 重定向 |
+| 本地 remote | `git remote set-url origin https://github.com/SlipperSoar/PlanetTerrarium.git`，`ls-remote` 验证 main 与 V3.3.0 tag 均可访问 |
+| 发布脚本 | `scripts/release.ps1` 的 `-Repo` 默认值改 `SlipperSoar/PlanetTerrarium`；zip 名 / exe 名改 `PlanetTerrarium.zip` / `.exe`（脚本保持纯 ASCII） |
+| 构建入口 | `WindowsBuild.ExeName` → `PlanetTerrarium.exe` |
+| Unity 设置 | `ProjectSettings.asset` 的 `productName` / `applicationIdentifier.Standalone` / `metroPackageName` / `metroApplicationDescription` 四处同步 |
+| 文档 | README 当前发布约定改为新资产名；本文件 §16.5 等**历史实测记录保留旧名**（记的是当时真实产物，不代表当前命名） |
+
+**未改（有意）**：
+- 本地文件夹 `D:\Projects\Github\WorldTerrainMapViewer` 与 `D:\Porjects\...` junction 保持不变
+  （改名会让 `dsh_preview/icecheck` 里约 250 处硬编码路径、当前工作区路径全部失效，风险远大于收益）
+- `dsh_preview/` 是 git-ignored 的离线校验台，其中的旧名引用属于本地工具路径，不随产品名变化
+
+**验证**：改名后跑 gate / 11 dump 基线 / Unity `CheckCompile` + 完整 `Build`（新 exe 名）/
+`GenerationProbe`，并用 `release.ps1` 的预检确认新 `-Repo` 指向正确（不实际发布）。
+
+---
+
 ## 附：不当作基线的历史数值
 
 以下数值出现在早期记录里，因为算法改动而**不再有效**，列出仅供追溯：
